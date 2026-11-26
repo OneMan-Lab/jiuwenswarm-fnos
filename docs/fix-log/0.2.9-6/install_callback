@@ -1,0 +1,51 @@
+#!/bin/bash
+# 安装文件落地后：准备数据目录 + 离线安装运行时（幂等，可重复执行）。
+# 设备 app config sys.autoRunNewApp=true，安装完成后框架通常会立刻调用 cmd/main start。
+set -u
+
+. "${TRIM_APPDEST:?TRIM_APPDEST is required}/server/init_env.sh"
+# shellcheck source=/dev/null
+. "${TRIM_APPDEST}/server/runtime.sh"
+
+if ! jw_ensure_dirs; then
+  jw_fail "无法创建/写入应用数据目录：${JW_DATA}"
+  exit 1
+fi
+
+if ! jw_prepare_data_dir; then
+  exit 1
+fi
+
+if ! jw_install_venv; then
+  exit 1
+fi
+
+jw_init_workspace || true
+
+# 网关进程 uid 探测：跨用户读 /proc/<pid>/exe 会 EACCES，需要把网关信任域 uid 记入 app.env，
+# 作为 exe 不可读时的降级白名单。只在 app.env 不存在时自动生成（不覆盖管理员配置）。
+JW_ENV_FILE="${TRIM_PKGVAR}/app.env"
+if [ ! -f "${JW_ENV_FILE}" ] && [ -n "${PYTHON3:-}" ]; then
+  _det="$("${PYTHON3}" "${JW_SERVER_DIR}/detect_gateway_uid.py" 2>/dev/null || true)"
+  _uids="$(printf '%s\n' "${_det}" | sed -n 's/^uids=//p')"
+  _gids="$(printf '%s\n' "${_det}" | sed -n 's/^gids=//p')"
+  if [ -n "${_uids}" ]; then
+    {
+      printf 'JW_GATEWAY_UID=%s\n' "${_uids}"
+      [ -n "${_gids}" ] && printf 'JW_GATEWAY_GID=%s\n' "${_gids}"
+    } >"${JW_ENV_FILE}"
+    chmod 600 "${JW_ENV_FILE}"
+    # 生命周期脚本可能以 root 运行：若属主留成 root，应用用户启动时 init_env.sh 的
+    # 属主校验会整份忽略该文件（探测结果静默失效），所以显式归属应用用户。
+    if [ "$(id -u)" = "0" ] && [ -n "${TRIM_UID:-}" ] && [ -n "${TRIM_GID:-}" ]; then
+      chown "${TRIM_UID}:${TRIM_GID}" "${JW_ENV_FILE}" 2>/dev/null \
+        || jw_log "WARN: chown ${TRIM_UID}:${TRIM_GID} ${JW_ENV_FILE} 失败（属主仍为 root，解析器允许 root 属主，不影响生效）"
+    fi
+    jw_log "已识别网关进程 uid=${_uids} gid=${_gids:-?}，写入 ${JW_ENV_FILE}（exe 不可读时的降级白名单）"
+  else
+    jw_log "WARN: 未识别到网关进程；若入口返回 403，请按 launcher.log 中 '403 peer ... uid=...' 的值写入 ${JW_ENV_FILE} 的 JW_GATEWAY_UID（可逗号分隔多值）"
+  fi
+fi
+
+jw_log "安装完成：数据目录 ${JW_DATA}"
+exit 0

@@ -1,0 +1,5 @@
+#!/bin/bash
+# 升级前：先停服务，避免旧版本进程占着端口/Socket 影响文件替换。
+[ -x "${TRIM_APPDEST:-}/cmd/main" ] || exit 0
+"${TRIM_APPDEST}/cmd/main" stop
+exit 0

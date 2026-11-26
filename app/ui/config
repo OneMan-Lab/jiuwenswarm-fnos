@@ -1,0 +1,17 @@
+{
+  ".url": {
+    "jiuwenswarm.main": {
+      "title": "JiuwenSwarm",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/jiuwenswarm",
+      "gatewaySocket": "app.sock",
+      "url": "/app/jiuwenswarm",
+      "allUsers": false,
+      "control": {
+        "accessPerm": "readonly"
+      }
+    }
+  }
+}

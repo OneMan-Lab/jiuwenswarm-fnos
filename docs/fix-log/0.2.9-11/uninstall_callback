@@ -1,0 +1,171 @@
+#!/bin/bash
+# 卸载清理：只删本应用创建的文件；用户数据默认保留，向导选择 wizard_delete_data=true 时删除。
+#
+# ⚠️ 卸载阶段 ${TRIM_APPDEST}（@appcenter/jiuwenswarm）**已被框架删除**，
+#    所以这里绝对不能 source target 下的任何脚本（init_env.sh / runtime.sh）——
+#    历史 bug：source 失败 + `set -u` → 提前退出，用户勾选「清除全部应用数据」也一个文件没删。
+#
+# 维护硬规则（0.2.9-10 起，改动本脚本必须遵守，验收口径见 DELIVERY-NOTES §9.11）：
+#   1) 参数校验 fail-fast：TRIM_PKGVAR 为空 / 路径非法 → 立刻中止，绝不删；
+#   2) 删除动作 fail-open：单项失败只 WARN，继续删其余，最后汇总；
+#   3) 始终 exit 0：卸载失败退出码可能触发平台回滚/报错，比"有残留"更危险；
+#   4) 隐私优先顺序：app.env（含 API Key）→ home → data → venv/logs/run/pycache；
+#   5) 打印平台注入的 TRIM_PKGVAR/TRIM_PKGHOME/TRIM_PKGTMP 实际值，便于事后排查。
+set -u
+
+VAR="${TRIM_PKGVAR:-}"
+TMP="${TRIM_PKGTMP:-}"
+APP_HOME="${TRIM_PKGHOME:-}"
+LOG="${TRIM_TEMP_LOGFILE:-}"
+
+say() { echo "[jiuwenswarm] $*"; }
+logline() {
+  say "$*"
+  if [ -n "${LOG}" ]; then printf '%s\n' "[jiuwenswarm] $*" >>"${LOG}" 2>/dev/null || true; fi
+}
+# 参数非法：硬中止（此时尚未删除任何东西）
+abort() {
+  say "ERROR: $*" >&2
+  if [ -n "${LOG}" ]; then printf '[jiuwenswarm] ERROR: %s\n' "$*" >>"${LOG}" 2>/dev/null || true; fi
+  exit 1
+}
+
+logline "uninstall: TRIM_PKGVAR='${VAR}' TRIM_PKGHOME='${APP_HOME}' TRIM_PKGTMP='${TMP}' TRIM_APPDEST='${TRIM_APPDEST:-}'"
+logline "uninstall: wizard_delete_data 原值='${wizard_delete_data-<未注入>}'"
+
+# 向导参数归一化：平台可能传 true/True/TRUE/1/yes/on（大小写与形态不定），
+# 旧实现只认字符串 "true"，导致所有用户的「清除全部应用数据」都不生效（P0-03）。
+case "$(printf '%s' "${wizard_delete_data-}" | tr '[:upper:]' '[:lower:]')" in
+  true|1|yes|on|y) DELETE_DATA=1 ;;
+  *) DELETE_DATA=0 ;;
+esac
+logline "uninstall: 解析结果 wizard_delete_data=${DELETE_DATA}（1=清除，0=保留）"
+
+[ -n "${VAR}" ] || abort "TRIM_PKGVAR 未注入，无法安全定位应用目录；已中止，未删除任何文件"
+
+VENV="${VAR}/venv"
+DATA="${VAR}/data"
+LOGS="${VAR}/logs"
+RUN="${VAR}/run"
+PYCACHE="${VAR}/pycache"
+ENV_FILE="${VAR}/app.env"
+SOCKET="${TRIM_APPDEST:-}/app.sock"
+
+DELETED=()
+RESIDUAL=()
+
+_unsafe_reason() {
+  local p="${1:-}"
+  case "${p}" in
+    "") echo "路径为空"; return 0 ;;
+    /*) : ;;
+    *) echo "非绝对路径"; return 0 ;;
+  esac
+  [ "${p}" = "/" ] && { echo "拒绝删除 /"; return 0; }
+  echo ""
+}
+
+# 运行期/数据目录：必须位于 jiuwenswarm 目录下（fail-open）
+try_rm_app() {
+  local p="$1"
+  local why; why="$(_unsafe_reason "${p}")"
+  if [ -n "${why}" ]; then
+    logline "WARN: 跳过 '${p}'（${why}）"; RESIDUAL+=("${p}（${why}）"); return 0
+  fi
+  case "${p}" in
+    */jiuwenswarm|*/jiuwenswarm/*) : ;;
+    *) logline "WARN: 跳过 '${p}'（路径不在 jiuwenswarm 目录下）"; RESIDUAL+=("${p}（路径越界）"); return 0 ;;
+  esac
+  if [ -e "${p}" ] || [ -L "${p}" ]; then
+    if rm -rf -- "${p}"; then logline "已删除 ${p}"; DELETED+=("${p}")
+    else logline "WARN: 未删除 ${p}（rm 失败）"; RESIDUAL+=("${p}（rm 失败）"); fi
+  fi
+  return 0
+}
+
+# app home：放宽为「与 TRIM_PKGVAR 同名的兄弟目录」（@apphome/jiuwenswarm vs @appdata/jiuwenswarm）
+try_rm_home() {
+  local p="$1"
+  local why; why="$(_unsafe_reason "${p}")"
+  if [ -n "${why}" ]; then
+    logline "WARN: 跳过 home '${p}'（${why}）"; RESIDUAL+=("${p}（${why}）"); return 0
+  fi
+  local want; want="$(basename -- "${VAR}")"
+  if [ "$(basename -- "${p}")" != "${want}" ]; then
+    # 平台可能把 TRIM_PKGHOME 指到父目录（如 @apphome 本身）：改用同名兄弟目录再试一次
+    # 两种可能：p 是父目录（如 @apphome）→ 取 p/应用名；p 是同级的其它名字 → 取 dirname(p)/应用名
+    local cand1 cand2
+    cand1="${p}/${want}"
+    cand2="$(dirname -- "${p}")/${want}"
+    logline "WARN: TRIM_PKGHOME='${p}' basename 不是应用名，尝试 '${cand1}' 或 '${cand2}'"
+    if [ -e "${cand1}" ] || [ -L "${cand1}" ]; then
+      p="${cand1}"
+    elif [ -e "${cand2}" ] || [ -L "${cand2}" ]; then
+      p="${cand2}"
+    else
+      logline "WARN: 跳过 home（'${cand1}' 与 '${cand2}' 均不存在）"
+      RESIDUAL+=("${p}（basename 不一致且无法定位应用 home）"); return 0
+    fi
+  fi
+  if [ -e "${p}" ] || [ -L "${p}" ]; then
+    if rm -rf -- "${p}"; then logline "已删除 ${p}"; DELETED+=("${p}")
+    else logline "WARN: 未删除 ${p}（rm 失败）"; RESIDUAL+=("${p}（rm 失败）"); fi
+  fi
+  return 0
+}
+
+# 尽力停止服务
+PID_FILE="${RUN}/supervisor.pid"
+if [ -f "${PID_FILE}" ]; then
+  pid="$(head -n 1 "${PID_FILE}" 2>/dev/null | tr -cd '0-9')"
+  if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+    if tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null | grep -qF "${VENV}"; then
+      say "停止进程组 pid=${pid}"
+      kill -TERM -- "-${pid}" 2>/dev/null || kill -TERM "${pid}" 2>/dev/null || true
+      i=0
+      while kill -0 "${pid}" 2>/dev/null && [ "${i}" -lt 15 ]; do sleep 1; i=$((i + 1)); done
+      kill -0 "${pid}" 2>/dev/null && { kill -KILL -- "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null || true; }
+    else
+      say "WARN: pid=${pid} 不属于本应用 venv，跳过停止"
+    fi
+  fi
+  rm -f -- "${PID_FILE}" 2>/dev/null || true
+fi
+
+if [ "${DELETE_DATA}" = "1" ]; then
+  logline "向导选择：清除全部应用数据"
+  if [ -f "${ENV_FILE}" ]; then
+    if rm -f -- "${ENV_FILE}"; then logline "已删除 ${ENV_FILE}"; DELETED+=("${ENV_FILE}")
+    else logline "WARN: 未删除 ${ENV_FILE}（rm 失败）"; RESIDUAL+=("${ENV_FILE}（rm 失败）"); fi
+  fi
+  [ -n "${APP_HOME}" ] && try_rm_home "${APP_HOME}"
+  try_rm_app "${DATA}"
+else
+  logline "已保留应用数据目录：${DATA}"
+fi
+
+# 运行期文件（无论是否删数据都清；放最后，避免服务还在跑时删 venv）
+try_rm_app "${VENV}.new"
+try_rm_app "${VENV}"
+try_rm_app "${LOGS}"
+try_rm_app "${RUN}"
+try_rm_app "${PYCACHE}"
+case "${SOCKET}" in
+  /?*/jiuwenswarm/app.sock) [ -S "${SOCKET}" ] && rm -f -- "${SOCKET}" 2>/dev/null || true ;;
+esac
+if [ -n "${TMP}" ] && [ -d "${TMP}" ]; then
+  find "${TMP}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+fi
+
+if [ -d "${VAR}" ]; then
+  rmdir -- "${VAR}" 2>/dev/null || say "WARN: ${VAR} 仍有残留，未删除目录本身"
+fi
+
+logline "清理汇总：已删除 ${#DELETED[@]} 项"
+if [ "${#RESIDUAL[@]}" -gt 0 ]; then
+  logline "WARN: 有 ${#RESIDUAL[@]} 项未能删除，请人工确认："
+  for item in "${RESIDUAL[@]}"; do logline "  - ${item}"; done
+  logline "提示：若以上路径仍存在，可手动删除；app.env 若曾存真实 API Key，请到模型平台轮换该 Key。"
+fi
+
+exit 0

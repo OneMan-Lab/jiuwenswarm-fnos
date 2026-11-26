@@ -1,0 +1,22 @@
+appname=jiuwenswarm
+version=0.2.9-12
+display_name=JiuwenSwarm
+desc=多智能体协作与 Skill 自演进工作台。经飞牛统一网关入口访问，仅管理员可用（单用户实例，数据不隔离）。模型 API Key 由用户在本机配置，数据保存在应用数据目录。
+source=thirdparty
+platform=x86
+
+maintainer=openJiuwen
+maintainer_url=https://gitcode.com/openJiuwen/jiuwenswarm
+
+os_min_version=1.1.3100
+
+desktop_uidir=ui
+desktop_applaunchname=jiuwenswarm.main
+
+ctl_stop=true
+checkport=false
+disable_authorization_path=true
+
+
+install_dep_apps=python312
+changelog=安全加固（qa 必修改）：WS Origin 判定改为 Host 优先（代理头仅在 Host 缺失/回环时兜底）、多条 Host 直接拒、Host 解析失败直接拒（含 @）、fallback 放行打 WARN 并计数；新增分支标记文件 ws-origin-last-*.flag、日志轮转改为保留最近 200 行。卸载脚本候选路径补二次安全校验。修复域名/DDNS 访问 WS、卸载清除不生效。含 WS 多网卡白名单、logo 前缀、构建新鲜度校验、CSP、日志轮转、官方图标。使用前请在应用中心安装 python312 运行时。

@@ -1,0 +1,25 @@
+#!/bin/bash
+# 升级后：按新版本重建 venv（数据目录不动），并做增量工作区初始化。
+set -u
+
+# 目标目录下的脚本必须先确认存在，再 source：缺失时要给出明确错误，
+# 而不是在 `set -u` 下抛 unbound variable（卸载阶段 target 已被删除就是这种场景）。
+INIT_ENV="${TRIM_APPDEST:-}/server/init_env.sh"
+if [ ! -f "${INIT_ENV}" ]; then
+  _msg="应用文件不完整：缺少 ${INIT_ENV}，无法继续（未修改任何数据）"
+  echo "[jiuwenswarm] ERROR: ${_msg}" >&2
+  if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+    printf '%s\n' "${_msg}" >"${TRIM_TEMP_LOGFILE}"
+  fi
+  exit 1
+fi
+. "${INIT_ENV}"
+# shellcheck source=/dev/null
+. "${TRIM_APPDEST}/server/runtime.sh"
+
+jw_ensure_dirs || { jw_fail "无法创建/写入应用数据目录：${JW_DATA}"; exit 1; }
+jw_prepare_data_dir || exit 1
+jw_install_venv || exit 1
+jw_init_workspace || true
+jw_log "升级完成到 ${TRIM_APPVER:-unknown}"
+exit 0

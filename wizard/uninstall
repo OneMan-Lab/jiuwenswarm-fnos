@@ -1,0 +1,21 @@
+[
+  {
+    "stepTitle": "卸载确认",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "即将卸载 JiuwenSwarm。数据目录保存着会话历史、模型配置（含 API Key）与智能体产出的文件，默认保留，重新安装后可继续使用。"
+      },
+      {
+        "type": "radio",
+        "label": "数据处置",
+        "field": "wizard_delete_data",
+        "initValue": "false",
+        "options": [
+          { "label": "保留现有数据（推荐）", "value": "false" },
+          { "label": "清除全部应用数据（不可恢复）", "value": "true" }
+        ]
+      }
+    ]
+  }
+]

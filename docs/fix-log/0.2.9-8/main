@@ -1,0 +1,201 @@
+#!/bin/bash
+# cmd/main —— start / stop / status
+#   0 = 成功（status 中表示运行中）；1 = 失败；3 = status 中表示未运行
+# 进程模型：cmd/main 启动唯一守护进程 server/supervisor.py（自建进程组），
+# 由它管理 app / web / uds-gateway 三个子进程。
+set -u
+
+. "${TRIM_APPDEST:?TRIM_APPDEST is required}/server/init_env.sh"
+# shellcheck source=/dev/null
+. "${TRIM_APPDEST}/server/runtime.sh"
+
+SUPERVISOR="${JW_SERVER_DIR}/supervisor.py"
+START_TIMEOUT="${JW_START_TIMEOUT:-180}"
+STOP_TIMEOUT="${JW_STOP_TIMEOUT:-20}"
+
+jw_log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [cmd/main] $*"; }
+
+jw_error() {
+  jw_log "ERROR: $*"
+  if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+    printf '%s\n' "$*" >"${TRIM_TEMP_LOGFILE}"
+  fi
+}
+
+read_pid() {
+  [ -r "${JW_PID_FILE}" ] || return 1
+  local pid
+  pid="$(head -n 1 "${JW_PID_FILE}" 2>/dev/null | tr -cd '0-9')"
+  [ -n "${pid}" ] || return 1
+  printf '%s' "${pid}"
+}
+
+is_our_supervisor() {
+  local pid="${1:-}"
+  [ -n "${pid}" ] || return 1
+  kill -0 "${pid}" 2>/dev/null || return 1
+  [ -r "/proc/${pid}/cmdline" ] || return 1
+  tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null | grep -qF "${SUPERVISOR}"
+}
+
+venv_usable() {
+  # python312 运行时应用若升级/更换，venv 的解释器链接可能失效；这里做一次自检。
+  [ -x "${JW_VENV}/bin/python" ] || return 1
+  "${JW_VENV}/bin/python" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)' \
+    >/dev/null 2>&1
+}
+
+health_ok() {
+  [ -x "${JW_VENV}/bin/python" ] || return 1
+  "${JW_VENV}/bin/python" - "${FRONTEND_HOST}" "${FRONTEND_PORT}" <<'PY' >/dev/null 2>&1
+import http.client
+import sys
+
+try:
+    conn = http.client.HTTPConnection(sys.argv[1], int(sys.argv[2]), timeout=3)
+    conn.request("GET", "/")
+    resp = conn.getresponse()
+    resp.read(1)
+    sys.exit(0 if resp.status < 500 else 1)
+except Exception:
+    sys.exit(1)
+PY
+}
+
+is_running() {
+  local pid
+  pid="$(read_pid)" || return 1
+  is_our_supervisor "${pid}" || return 1
+  [ -S "${JW_SOCKET}" ] || return 1
+  health_ok
+}
+
+stop_process() {
+  local pid i
+  pid="$(read_pid || true)"
+  if [ -n "${pid}" ] && is_our_supervisor "${pid}"; then
+    jw_log "停止进程组 pid=${pid}"
+    kill -TERM -- "-${pid}" 2>/dev/null || kill -TERM "${pid}" 2>/dev/null || true
+    i=0
+    while kill -0 "${pid}" 2>/dev/null && [ "${i}" -lt "${STOP_TIMEOUT}" ]; do
+      sleep 1
+      i=$((i + 1))
+    done
+    if kill -0 "${pid}" 2>/dev/null; then
+      jw_log "进程组未退出，强制 KILL pid=${pid}"
+      kill -KILL -- "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null || true
+    fi
+  fi
+
+  # 兜底：launcher 被 SIGKILL 后孙进程可能被 init 收养，按 venv 路径清扫
+  local p victims=""
+  for p in $(pgrep -f -- "${JW_VENV}" 2>/dev/null || true); do
+    [ "${p}" = "$$" ] && continue
+    victims="${victims} ${p}"
+  done
+  if [ -n "${victims}" ]; then
+    jw_log "清扫残留进程：${victims}"
+    # shellcheck disable=SC2086
+    kill -TERM ${victims} 2>/dev/null || true
+    sleep 2
+    # shellcheck disable=SC2086
+    kill -KILL ${victims} 2>/dev/null || true
+  fi
+
+  rm -f "${JW_PID_FILE}" "${JW_SOCKET}" 2>/dev/null || true
+  jw_log "已停止"
+  return 0
+}
+
+start_process() {
+  if is_running; then
+    jw_log "已在运行（pid=$(read_pid || echo '?')），跳过启动"
+    return 0
+  fi
+
+  if [ -z "${PYTHON3:-}" ]; then
+    jw_error "未找到 Python 3.12 运行时。请先在飞牛应用中心安装 python312，然后重新启动本应用。"
+    return 1
+  fi
+  if ! venv_usable; then
+    jw_log "WARN: 虚拟环境不可用或 Python 版本已变化（可能 python312 被升级），尝试用 wheelhouse 自动重建…"
+    if ! jw_install_venv; then
+      jw_error "运行时重建失败：${JW_VENV}。请查看 ${JW_LOGS}/install.log，或重装应用。"
+      return 1
+    fi
+    jw_log "虚拟环境重建完成"
+  elif ! jw_venv_fingerprint_ok; then
+    # 版本号相同不代表内容相同：本包对上游 wheel 打过补丁（CSP 等）。
+    # 升级后若只比版本号，会继续用旧 wheel，修复对升级用户不生效。
+    jw_log "WARN: 包内 wheel 与已装 venv 不一致（升级场景），重建运行时…"
+    if ! jw_install_venv; then
+      jw_error "运行时重建失败：${JW_VENV}。请查看 ${JW_LOGS}/install.log，或重装应用。"
+      return 1
+    fi
+    jw_log "虚拟环境重建完成"
+  fi
+  if [ ! -f "${SUPERVISOR}" ]; then
+    jw_error "启动器缺失：${SUPERVISOR}。安装包不完整，请重新安装。"
+    return 1
+  fi
+  if [ ! -d "${JW_DATA}" ]; then
+    jw_error "数据目录缺失：${JW_DATA}。请重新安装应用。"
+    return 1
+  fi
+
+  mkdir -p "${JW_LOGS}" "${JW_RUN}" "${TRIM_PKGTMP}" || true
+  # 上次异常退出可能留下 socket
+  rm -f "${JW_SOCKET}" 2>/dev/null || true
+  stop_process >/dev/null 2>&1 || true
+
+  jw_log "启动 supervisor：${SUPERVISOR}"
+  (
+    cd "${JW_DATA}" || exit 1
+    umask 077
+    exec "${JW_VENV}/bin/python" "${SUPERVISOR}"
+  ) >>"${JW_LAUNCHER_LOG}" 2>&1 &
+  local pid=$!
+  printf '%s\n' "${pid}" >"${JW_PID_FILE}"
+
+  local i=0
+  while [ "${i}" -lt "${START_TIMEOUT}" ]; do
+    if ! kill -0 "${pid}" 2>/dev/null; then
+      tail -n 20 "${JW_LAUNCHER_LOG}" 2>/dev/null || true
+      jw_error "启动失败：supervisor 进程已退出，详见 ${JW_LAUNCHER_LOG}"
+      return 1
+    fi
+    if [ -S "${JW_SOCKET}" ] && health_ok; then
+      jw_log "启动成功（${i}s）：socket=${JW_SOCKET}"
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+    [ $((i % 20)) -eq 0 ] && jw_log "等待服务就绪… ${i}s/${START_TIMEOUT}s"
+  done
+
+  tail -n 20 "${JW_LAUNCHER_LOG}" 2>/dev/null || true
+  jw_error "启动超时（${START_TIMEOUT}s 内未就绪），详见 ${JW_LAUNCHER_LOG}"
+  stop_process >/dev/null 2>&1 || true
+  return 1
+}
+
+case "${1:-}" in
+  start)
+    start_process || exit 1
+    exit 0
+    ;;
+  stop)
+    stop_process || exit 1
+    exit 0
+    ;;
+  status)
+    if is_running; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    jw_error "未知命令：${1:-}（用法：start|stop|status）"
+    exit 1
+    ;;
+esac

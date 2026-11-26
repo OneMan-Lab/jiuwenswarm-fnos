@@ -1,0 +1,113 @@
+#!/bin/bash
+# 卸载清理：只删本应用创建的文件；用户数据默认保留，向导选择 wizard_delete_data=true 时删除。
+#
+# ⚠️ 卸载阶段 ${TRIM_APPDEST}（@appcenter/jiuwenswarm）**已被框架删除**，
+#    因此这里绝对不能 source target 下的任何脚本（init_env.sh / runtime.sh）。
+#    历史 bug：source 失败 + `set -u` → unbound variable → 脚本提前退出，
+#    用户勾选「清除全部应用数据」也一个文件没删（隐私承诺失效）。
+#    本脚本只使用框架注入的 TRIM_PKGVAR / TRIM_PKGHOME / TRIM_PKGTMP / TRIM_TEMP_LOGFILE。
+set -u
+
+VAR="${TRIM_PKGVAR:-}"
+TMP="${TRIM_PKGTMP:-}"
+APP_HOME="${TRIM_PKGHOME:-}"
+LOG="${TRIM_TEMP_LOGFILE:-}"
+
+say() { echo "[jiuwenswarm] $*"; }
+fail() {
+  say "ERROR: $*" >&2
+  if [ -n "${LOG}" ]; then
+    printf '%s\n' "$*" >"${LOG}" 2>/dev/null || true
+  fi
+  exit 1
+}
+
+# 变量为空时绝不能继续：否则 rm -rf "" 或误删根目录。
+[ -n "${VAR}" ] || fail "TRIM_PKGVAR 未注入，无法安全定位应用目录；已中止，未删除任何文件"
+
+VENV="${VAR}/venv"
+DATA="${VAR}/data"
+LOGS="${VAR}/logs"
+RUN="${VAR}/run"
+PYCACHE="${VAR}/pycache"
+ENV_FILE="${VAR}/app.env"
+SOCKET="${TRIM_APPDEST:-}/app.sock"
+
+# 硬性保护：只删「绝对路径 + 位于 jiuwenswarm 目录下」的目标。
+# 任何变量异常都会在这里被拦住，而不是变成 rm -rf "" / rm -rf /。
+safe_rm() {
+  local p="${1:-}"
+  case "${p}" in
+    /*) : ;;
+    *) fail "拒绝删除非绝对路径：'${p}'" ;;
+  esac
+  case "${p}" in
+    */jiuwenswarm|*/jiuwenswarm/*) : ;;
+    *) fail "拒绝删除不在 jiuwenswarm 目录下的路径：'${p}'" ;;
+  esac
+  [ "${p}" = "/" ] && fail "拒绝删除 /"
+  if [ -e "${p}" ] || [ -L "${p}" ]; then
+    rm -rf -- "${p}" || fail "删除失败：${p}"
+    say "已删除 ${p}"
+  fi
+}
+
+# 1) 尽力停止服务：target 已删，不能调 cmd/main，只能按 var/run 里的 pid 收口。
+#    只杀 cmdline 确实引用本应用 venv 的进程，避免误杀。
+PID_FILE="${RUN}/supervisor.pid"
+if [ -f "${PID_FILE}" ]; then
+  pid="$(head -n 1 "${PID_FILE}" 2>/dev/null | tr -cd '0-9')"
+  if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+    if tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null | grep -qF "${VENV}"; then
+      say "停止进程组 pid=${pid}"
+      kill -TERM -- "-${pid}" 2>/dev/null || kill -TERM "${pid}" 2>/dev/null || true
+      i=0
+      while kill -0 "${pid}" 2>/dev/null && [ "${i}" -lt 15 ]; do
+        sleep 1
+        i=$((i + 1))
+      done
+      if kill -0 "${pid}" 2>/dev/null; then
+        kill -KILL -- "-${pid}" 2>/dev/null || kill -KILL "${pid}" 2>/dev/null || true
+      fi
+    else
+      say "WARN: pid=${pid} 不属于本应用 venv，跳过停止"
+    fi
+  fi
+  rm -f -- "${PID_FILE}" 2>/dev/null || true
+fi
+
+# 2) 运行期文件（无论是否删数据都要清）：venv / logs / run / pycache / socket / tmp
+safe_rm "${VENV}.new"
+safe_rm "${VENV}"
+safe_rm "${LOGS}"
+safe_rm "${RUN}"
+safe_rm "${PYCACHE}"
+case "${SOCKET}" in
+  /?*/jiuwenswarm/app.sock) [ -S "${SOCKET}" ] && rm -f -- "${SOCKET}" || true ;;
+esac
+if [ -n "${TMP}" ] && [ -d "${TMP}" ]; then
+  find "${TMP}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+fi
+
+# 3) 用户数据：默认保留；向导明确选择清除时必须真删，删不掉要报错（不能静默）。
+if [ "${wizard_delete_data:-false}" = "true" ]; then
+  say "向导选择：清除全部应用数据"
+  safe_rm "${DATA}"
+  # app home 里存的是运行期用户数据（工作区/配置备份等），一并清除
+  if [ -n "${APP_HOME}" ] && [ -d "${APP_HOME}" ]; then
+    safe_rm "${APP_HOME}"
+  fi
+  if [ -f "${ENV_FILE}" ]; then
+    rm -f -- "${ENV_FILE}" || fail "删除失败：${ENV_FILE}"
+    say "已删除 ${ENV_FILE}"
+  fi
+  # var 目录空了就顺手删掉；非空说明还有我们没识别的残留，保留并提示
+  if [ -d "${VAR}" ]; then
+    rmdir -- "${VAR}" 2>/dev/null || say "WARN: ${VAR} 仍有残留文件，未删除目录本身"
+  fi
+  say "应用数据已清除（${DATA}）"
+else
+  say "已保留应用数据目录：${DATA}"
+fi
+
+exit 0

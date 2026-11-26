@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+# app/server/supervisor.py —— 单一守护进程，管理 JiuwenSwarm 的三个子进程
+#
+#   supervisor（setsid，独立进程组）
+#     ├─ python -m jiuwenswarm.app --keep-worker      → AgentServer 18092 + Gateway 19001
+#     ├─ python -m ...channels.web.app_web            → 静态 dist + /api、/ws 反代（127.0.0.1:15173）
+#     └─ python uds_gateway.py                        → ${TRIM_APPDEST}/app.sock（fnOS 网关入口）
+#
+# 为什么需要它：upstream 用 supervisor/MultiProcess 自己 fork，直接 TERM 父进程会留下孙进程
+# 占着端口；这里以「进程组」为单位统一收口，stop 时整组退出（cmd/main 还会按 venv 路径兜底清扫）。
+
+from __future__ import annotations
+
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+VENV = os.environ.get("JW_VENV", "")
+DATA = os.environ.get("JIUWENSWARM_DATA_DIR", "")
+SERVER_DIR = os.environ.get("JW_SERVER_DIR", "")
+LOG_DIR = os.environ.get("JW_LOGS", "")
+
+STOP_TIMEOUT = int(os.environ.get("JW_STOP_TIMEOUT", "20"))
+BACKOFF = float(os.environ.get("JW_CHILD_BACKOFF", "1.0"))
+
+# --------------------------------------------------------------- 日志轮转 ----
+# launcher.log 是 supervisor 与三个子进程共用的 stdout/stderr。上游组件即使只有
+# INFO 级输出也会持续写（真机空载约 27 B/s ≈ 70 MB/月），必须自己兜住，
+# 否则长期运行会把数据卷写满。
+#
+# 关键约束：子进程继承的是 cmd/main 用 `>>` 打开的 O_APPEND fd。因此**不能用
+# rename 轮转**——rename 后子进程仍写旧 inode，新文件永远是空的。正确做法是
+# 「把尾部拷到 .1，然后原地 truncate 原文件」：O_APPEND 让下一次写入落到新末尾
+# （offset 0），fd 始终有效，也不会出现日志空窗。
+LAUNCHER_LOG = os.environ.get("JW_LAUNCHER_LOG") or (
+    str(Path(LOG_DIR) / "launcher.log") if LOG_DIR else ""
+)
+LOG_MAX_BYTES = int(os.environ.get("JW_LAUNCHER_MAX_BYTES", str(20 * 1024 * 1024)))
+LOG_KEEP_BYTES = int(os.environ.get("JW_LAUNCHER_KEEP_BYTES", str(256 * 1024)))
+LOG_CHECK_INTERVAL = float(os.environ.get("JW_LAUNCHER_CHECK_INTERVAL", "30"))
+
+_shutdown = False
+
+
+def log(msg: str) -> None:
+    print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [supervisor] {msg}", flush=True)
+
+
+def _children() -> list[tuple[str, list[str]]]:
+    python = str(Path(VENV) / "bin" / "python")
+    return [
+        ("app", [python, "-m", "jiuwenswarm.app", "--keep-worker"]),
+        (
+            "web",
+            [
+                python,
+                "-m",
+                "jiuwenswarm.channels.web.app_web",
+                "--host",
+                os.environ.get("FRONTEND_HOST", "127.0.0.1"),
+                "--port",
+                os.environ.get("FRONTEND_PORT", "15173"),
+            ],
+        ),
+        ("gateway-bridge", [python, str(Path(SERVER_DIR) / "uds_gateway.py")]),
+    ]
+
+
+def _signal(signum, _frame) -> None:
+    global _shutdown
+    _shutdown = True
+    log(f"received signal {signum}")
+
+
+def _terminate(procs: dict[str, subprocess.Popen], grace: int) -> None:
+    for name, proc in procs.items():
+        if proc.poll() is None:
+            log(f"TERM {name} pid={proc.pid}")
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+    deadline = time.time() + grace
+    while time.time() < deadline:
+        if all(p.poll() is not None for p in procs.values()):
+            break
+        time.sleep(0.2)
+    for name, proc in procs.items():
+        if proc.poll() is None:
+            log(f"KILL {name} pid={proc.pid}")
+            try:
+                proc.kill()
+            except OSError:
+                pass
+    for proc in procs.values():
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _rotate_launcher_log() -> None:
+    """超过阈值时把尾部若干字节留给 .1，然后原地清空 launcher.log。
+
+    只保留 1 份备份（.1），总占用上限约 LOG_MAX_BYTES + LOG_KEEP_BYTES。
+    """
+    if not LAUNCHER_LOG:
+        return
+    path = Path(LAUNCHER_LOG)
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size <= LOG_MAX_BYTES:
+        return
+    try:
+        with path.open("rb") as fh:
+            fh.seek(max(0, size - LOG_KEEP_BYTES))
+            tail = fh.read()
+        # 从完整行开始，避免备份首行被截断
+        cut = tail.find(b"\n")
+        if 0 <= cut < len(tail) - 1:
+            tail = tail[cut + 1 :]
+        backup = path.with_name(path.name + ".1")
+        backup.write_bytes(tail)
+        with path.open("r+b") as fh:
+            fh.truncate(0)
+        log(
+            f"rotated {path.name}: {size} B -> 0 B（尾部 {len(tail)} B 存入 {backup.name}）"
+        )
+    except OSError as exc:  # 轮转失败不能影响主服务
+        log(f"WARN: 轮转 {path.name} 失败：{exc}")
+
+
+def main() -> int:
+    global _shutdown
+    if not VENV or not DATA or not SERVER_DIR:
+        print("missing JW_VENV / JIUWENSWARM_DATA_DIR / JW_SERVER_DIR", file=sys.stderr)
+        return 1
+
+    Path(DATA).mkdir(parents=True, exist_ok=True)
+    if LOG_DIR:
+        Path(LOG_DIR).mkdir(parents=True, exist_ok=True)
+
+    # 独立进程组：cmd/main 的 kill -PGID 能一次收走全部子进程
+    try:
+        os.setsid()
+    except OSError:
+        pass
+
+    signal.signal(signal.SIGTERM, _signal)
+    signal.signal(signal.SIGINT, _signal)
+
+    procs: dict[str, subprocess.Popen] = {}
+    os.chdir(DATA)
+    # 上一次运行可能留下很大的日志，先兜一次再启动子进程
+    _rotate_launcher_log()
+    for name, argv in _children():
+        log(f"starting {name}: {' '.join(argv)}")
+        procs[name] = subprocess.Popen(argv, cwd=DATA, close_fds=True)
+
+    exit_code = 0
+    last_log_check = time.monotonic()
+    while not _shutdown:
+        for name, proc in list(procs.items()):
+            code = proc.poll()
+            if code is not None:
+                log(f"{name} exited unexpectedly with code {code}")
+                exit_code = 1 if code == 0 else (code or 1)
+                _shutdown = True
+                break
+        now = time.monotonic()
+        if now - last_log_check >= LOG_CHECK_INTERVAL:
+            _rotate_launcher_log()
+            last_log_check = now
+        time.sleep(BACKOFF)
+
+    _terminate(procs, STOP_TIMEOUT)
+    log("stopped")
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,5 @@
+#!/bin/bash
+# 卸载前：停止服务，释放端口与 Socket。
+[ -x "${TRIM_APPDEST:-}/cmd/main" ] || exit 0
+"${TRIM_APPDEST}/cmd/main" stop
+exit 0
