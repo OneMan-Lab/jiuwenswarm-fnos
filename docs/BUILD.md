@@ -21,6 +21,8 @@
                                    │
                               (4) check-wheels.py           架构/ABI 校验 + 生成清单
                                    │
+                              (4b) 清单对齐闸门             WHEELS.txt vs wheelhouse-manifest.txt
+                                   │                        （CI 强制；本地手工方法见 §5）
                               (5) build-fpk.sh
                                    ├─ CSP 补丁  (patch-app-web-csp.py  + --check)
                                    ├─ logo 补丁 (patch-app-web-logo.py + --check)
@@ -149,6 +151,15 @@ python3 scripts/check-wheels.py app/wheelhouse
 **为什么必须校验**：设备是 x86_64 + CPython 3.12。混进一个 `aarch64` 或 `cp313` 的 wheel，
 构建期看不出问题，安装期才炸。脚本对 `aarch64/arm64/armv7l/musllinux/win*/macosx/i686` 以及 `cp3>12` 的标签一律判失败。
 
+### 2.5 清单对齐闸门（CI 强制；本地手工方法见 §5）
+
+载荷构建完成后、打包之前，重建的 `app/wheelhouse/` 必须与 `requirements/wheelhouse-manifest.txt` 清单对齐
+（方法与 §5 手工方法逐字一致：清单去注释排序 vs `WHEELS.txt` 去表头排序，`diff -u` 比对，非空即失败）。
+GitHub Actions 的 `build-fpk.yml` 把这一步作为强制闸门内置，失败时按两类给出处置指引：
+
+- **文件名/版本差异 = 依赖漂移**：升级 `requirements/wheelhouse-manifest.txt`，并同步执行「换上游提交 = 换应用版本号」纪律（§1）。
+- **仅 sha 差异 = 构建环境差异**：按 §5 方法人工复核（先比文件名集合，再比可从索引直接下载项的 sha；本机构建包以版本号为准）。
+
 ---
 
 ## 3. 打包（`scripts/build-fpk.sh`）
@@ -175,8 +186,10 @@ TMPDIR=$HOME/fnpack-tmp FNPACK=/path/to/fnpack bash scripts/build-fpk.sh
 原因：平台把 `install_dep_apps` 当作"会改动系统依赖"的强操作，命令行 `install-fpk` 有安全闸会拦截带依赖的包；
 应用中心 UI 安装依赖是正常流程。**所以必须出两个包**，不要试图用一个包通吃。
 
-实现方式：脚本把工程**硬链接**复制到暂存目录（`cp -al`，避免复制 468 MB），在暂存目录里"先删再写"重写 `manifest`
-（打断硬链接，绝不改工作区），然后 `cd` 到暂存目录执行 `fnpack build`。
+实现方式：脚本把工程**硬链接**复制到暂存目录（`cp -al`，避免复制 468 MB），在暂存目录里按 profile 重写 `manifest`
+——写入走**临时文件 + `os.replace` 原子替换**（替换后暂存 manifest 指向新 inode，硬链接被打断，绝不改工作区；
+历史上曾因原地 `write_text` 截断重写硬链接文件而静默删掉工作区 `install_dep_apps` 行，即分析报告 Q-01，已修复），
+然后 `cd` 到暂存目录执行 `fnpack build`。
 
 ### 3.2 打包时的三道闸门
 

@@ -7,13 +7,15 @@
 #   - 构建链路与前置条件：docs/BUILD.md §1/§2/§3、README.md §5/§6
 #   - 构建机要求（x86_64 + Python 3.12 + Node>=20 + npm + git）：scripts/build-payload.sh:4-6,24-31
 #   - fnpack 1.3.3 安装地址：scripts/build-fpk.sh:32、docs/BUILD.md:203
-#   - 双 profile 语义（test 无依赖声明 / appstore 含 install_dep_apps=python312）：scripts/build-fpk.sh:12-15,167-176
+#   - 双 profile 语义（test 无依赖声明 / appstore 含 install_dep_apps=python312）：scripts/build-fpk.sh:12-15
 #   - 上游提交钉死：README.md:12,147-148、docs/BUILD.md:41-48
+#   - wheel 清单对齐方法：docs/BUILD.md §5
+# 设计文档：.codeartsdoer/specs/ci_build_workflow/spec.md、design.md（G1-G10 差距修复）
 
 name: Build fnOS .fpk
 
 on:
-  # 1) 手动触发：可选构建 profile 与上游提交
+  # 1) 手动触发：可选构建 profile 与上游提交（upstream_commit 偏离钉死值会在前置校验被拒绝）
   workflow_dispatch:
     inputs:
       profile:
@@ -33,9 +35,15 @@ on:
     tags:
       - "v*"
 
-# gh release create/upload 需要写权限（仅 tag 触发时使用）
+# 默认权限收敛为只读（G5）：写仓库权限只授予 release job（G5/§5.6 规则 3-4）
 permissions:
-  contents: write
+  contents: read
+
+# 并发控制（G8）：按触发源与 ref 隔离，同一手动触发或同一 tag 的新构建取消旧构建；
+# 不同 tag / 手动与 tag 互不取消。
+concurrency:
+  group: build-fpk-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   # 上游仓库与钉死提交（README.md:12 / docs/BUILD.md:41-48）。tag 触发时 github.event.inputs 为空，回退到默认值。
@@ -50,8 +58,13 @@ jobs:
   build:
     name: Build .fpk (x86_64 / Python 3.12)
     # 目标设备为 x86_64（manifest:6 platform=x86），必须用 x86_64 runner（scripts/build-payload.sh:25-26）
-    runs-on: ubuntu-latest
+    # 注意：ubuntu-24.04 上本机构建 wheel 的平台标签一致性未验证，以 CI 首跑的清单对齐闸门实测确认（G9）
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.artifacts.outputs.version }}
     steps:
       - name: Checkout 适配层仓库
         uses: actions/checkout@v4
@@ -68,10 +81,30 @@ jobs:
         with:
           node-version: "20"
 
-      # 构建机前置校验：架构 / Python / Node / npm / git（scripts/build-payload.sh:19-31）
+      # npm 缓存（G6）：key 绑定上游钉死提交，载荷变更时自然失效。
+      # 缓存不削弱闸门链：npm ci 仍按 lockfile 校验。pip / wheelhouse 成品 / 上游源码不缓存
+      # （wheelhouse 必须现场重建并由清单闸门校验，缓存会引入"新鲜度"与"闸门语义"冲突，
+      # 取舍理由见需求设计文档的缓存策略一节）。
+      - name: npm 缓存
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-jiuwenswarm-${{ env.UPSTREAM_COMMIT }}
+          restore-keys: |
+            npm-jiuwenswarm-
+
+      # 构建机前置校验：钉死断言（G4）+ 架构 / Python / Node / npm / git（scripts/build-payload.sh:19-31）
       - name: 构建机前置校验
         run: |
           set -euo pipefail
+          # 钉死校验必须最先执行：换上游提交 = 换应用版本号（docs/BUILD.md:56）
+          PINNED="7b95d38f2ac56acc5efe07e17e371cc3a8804376"
+          if [ "${UPSTREAM_COMMIT}" != "${PINNED}" ]; then
+            echo "ERROR: upstream_commit=${UPSTREAM_COMMIT} 偏离仓库钉死值 ${PINNED}，拒绝构建。"
+            echo "纪律：换上游提交 = 换应用版本号（docs/BUILD.md:56）。跟随上游新版本必须走版本升级流程"
+            echo "（同步 manifest 版本、补丁适配性评估与验收），不允许直接改本输入绕过。"
+            exit 1
+          fi
           arch="$(uname -m)"
           [ "$arch" = "x86_64" ] || { echo "需要 x86_64 runner，当前为 $arch"; exit 1; }
           python3 -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)' \
@@ -81,19 +114,34 @@ jobs:
           git --version
           echo "前置校验通过：arch=$arch python=$(python3 --version)"
 
-      # fnpack 1.3.3（scripts/build-fpk.sh:32、docs/BUILD.md:203）
+      # fnpack 1.3.3（scripts/build-fpk.sh:32、docs/BUILD.md:203）；
+      # --retry 只覆盖瞬时网络错误，404 属确定性失败，curl 默认不重试（G7）
       - name: 安装 fnpack ${FNPACK_VERSION}
         run: |
           set -euo pipefail
-          curl -fL "https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VERSION}-linux-amd64" -o "$RUNNER_TEMP/fnpack"
+          curl -fL --retry 3 --retry-delay 10 \
+            "https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VERSION}-linux-amd64" -o "$RUNNER_TEMP/fnpack"
           chmod +x "$RUNNER_TEMP/fnpack"
           "$RUNNER_TEMP/fnpack" --version
 
-      # 上游源码必须钉死在固定提交（docs/BUILD.md:41-48）；克隆到 runner.temp，避免污染仓库工作区
+      # 上游源码必须钉死在固定提交（docs/BUILD.md:41-48）；克隆到 runner.temp，避免污染仓库工作区。
+      # 克隆网络抖动重试 3 次（15s/30s/45s 退避，G7）；成功后的 checkout 钉死提交不重试（确定性错误立即失败）。
       - name: 取得上游 JiuwenSwarm 源码（钉死提交）
         run: |
           set -euo pipefail
-          git clone "$UPSTREAM_REPO" "$RUNNER_TEMP/jiuwenswarm"
+          clone_ok=0
+          for attempt in 0 1 2 3; do
+            if [ "$attempt" -gt 0 ]; then
+              delay=$((attempt * 15))
+              echo "克隆失败，${delay}s 后重试（第 ${attempt}/3 次重试）"
+              sleep "$delay"
+            fi
+            if git clone "$UPSTREAM_REPO" "$RUNNER_TEMP/jiuwenswarm"; then
+              clone_ok=1
+              break
+            fi
+          done
+          [ "$clone_ok" = "1" ] || { echo "ERROR: 上游仓库克隆 3 次重试均失败"; exit 1; }
           git -C "$RUNNER_TEMP/jiuwenswarm" checkout "$UPSTREAM_COMMIT"
           git -C "$RUNNER_TEMP/jiuwenswarm" log -1 --format='%H %ci %s'
           # 上游仓必须保持只读（docs/BUILD.md:58）
@@ -104,11 +152,28 @@ jobs:
         run: python3 -B scripts/sensitive-scan.py --strict .
 
       # 阶段 1：构造载荷 —— 前端 dist + 262 个离线 wheel（scripts/build-payload.sh）
-      # JIUENSWARM_SRC 覆盖默认的 ../jiuwenswarm 约定（scripts/build-payload.sh:11）
+      # JIUWENSWARM_SRC 覆盖默认的 ../jiuwenswarm 约定（scripts/build-payload.sh:11）
       - name: 构造载荷（前端 dist + 离线 wheel）
         env:
-          JIUENSWARM_SRC: ${{ runner.temp }}/jiuwenswarm
+          JIUWENSWARM_SRC: ${{ runner.temp }}/jiuwenswarm
         run: bash scripts/build-payload.sh
+
+      # wheel 清单对齐闸门（G3）：方法与 docs/BUILD.md §5 手工方法逐字一致。
+      # 重建的 wheelhouse 必须与 requirements/wheelhouse-manifest.txt 清单对齐，失败即整包拒绝。
+      - name: wheel 清单对齐闸门
+        run: |
+          set -euo pipefail
+          grep -v '^#' requirements/wheelhouse-manifest.txt | sort > "$RUNNER_TEMP/expected.tsv"
+          sed '1d' app/wheelhouse/WHEELS.txt | sort > "$RUNNER_TEMP/actual.tsv"
+          if ! diff -u "$RUNNER_TEMP/expected.tsv" "$RUNNER_TEMP/actual.tsv"; then
+            echo "ERROR: 重建 wheelhouse 与 wheelhouse-manifest.txt 不一致（方法见 docs/BUILD.md §5）。处置指引："
+            echo "  A) 文件名/版本差异 = 依赖漂移：升级 requirements/wheelhouse-manifest.txt，"
+            echo "     并同步执行「换上游提交 = 换应用版本号」纪律（docs/BUILD.md §5）。"
+            echo "  B) 仅 sha 差异 = 构建环境差异：按 docs/BUILD.md §5 方法人工复核"
+            echo "     （先比文件名集合，再比可从索引直接下载项的 sha；本机构建包以版本号为准）。"
+            exit 1
+          fi
+          echo "清单对齐通过：$(grep -vc '^#' requirements/wheelhouse-manifest.txt) 个 wheel 与清单一致"
 
       # 阶段 2：打包 .fpk —— 按 profile 逐个构建（scripts/build-fpk.sh）
       # 每个 profile 内部已包含：CSP 补丁闸门、logo 补丁闸门、新鲜度校验、profile 断言、verify-fpk.sh
@@ -141,7 +206,8 @@ jobs:
           ls -lh jiuwenswarm-*.fpk
           sha256sum jiuwenswarm-*.fpk | tee SHA256SUMS.txt
 
-      # 产物上传（.fpk 已是 gzip 压缩包，compression-level: 0 仅打包不再压）
+      # 产物上传（.fpk 已是 gzip 压缩包，compression-level: 0 仅打包不再压）。
+      # build job 只上传 Artifact，不写仓库（G5）；交付 Release 由 release job 独立完成。
       - name: 上传 .fpk 产物
         uses: actions/upload-artifact@v4
         with:
@@ -153,9 +219,23 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # 仅 tag 触发时把产物附到 Release（需要 permissions.contents: write）
+  # Release 交付（G5）：仅 tag 触发，needs: build 保证"全或无"（build 失败则本 job 不执行）；
+  # 不 checkout（无需源码，只消费 Artifact）；持有且仅持有 contents: write。
+  release:
+    name: Attach artifacts to Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: jiuwenswarm-fpk-${{ needs.build.outputs.version }}
+
       - name: 附加产物到 Release
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
