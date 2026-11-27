@@ -115,14 +115,16 @@ jobs:
           echo "前置校验通过：arch=$arch python=$(python3 --version)"
 
       # fnpack 1.3.3（scripts/build-fpk.sh:32、docs/BUILD.md:203）；
-      # --retry 只覆盖瞬时网络错误，404 属确定性失败，curl 默认不重试（G7）
+      # --retry 只覆盖瞬时网络错误，404 属确定性失败，curl 默认不重试（G7）。
+      # 版本验证用 --help：fnpack 1.3.3 是 cobra 应用，无 --version 标志
+      # （CI 首跑实测：--version 退出码 1，导致构建失败；本地 2026-11-27 已复现同一行为）。
       - name: 安装 fnpack ${FNPACK_VERSION}
         run: |
           set -euo pipefail
           curl -fL --retry 3 --retry-delay 10 \
             "https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VERSION}-linux-amd64" -o "$RUNNER_TEMP/fnpack"
           chmod +x "$RUNNER_TEMP/fnpack"
-          "$RUNNER_TEMP/fnpack" --version
+          "$RUNNER_TEMP/fnpack" --help | head -1
 
       # 上游源码必须钉死在固定提交（docs/BUILD.md:41-48）；克隆到 runner.temp，避免污染仓库工作区。
       # 克隆网络抖动重试 3 次（15s/30s/45s 退避，G7）；成功后的 checkout 钉死提交不重试（确定性错误立即失败）。
