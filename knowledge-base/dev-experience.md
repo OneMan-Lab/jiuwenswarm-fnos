@@ -196,6 +196,12 @@ grep -qE '^install_dep_apps[[:space:]]*=[[:space:]]*python312' manifest  || exit
 - 依赖声明看起来"更规范、更省事"，但在这个平台上它**换掉了可用安装通道**。
 - 两份产物名字只差一个后缀、体积只差几十字节，靠人记不住谁是谁 ⇒ 必须让**构建脚本断言**，而不是靠文档提醒。
 
+> **单包化注记（2026-11）**：0.2.9-12 构建策略已收敛为**单包**——仅构建应用中心包 `jiuwenswarm-{VERSION}.fpk`
+> （manifest 含 `install_dep_apps=python312`），test 档位与无版本软链 `jiuwenswarm.fpk` 已移除，
+> `BUILD_PROFILE=test` 显式报错；CLI `install-fpk` 不再是可用验证通道，真机验证统一走应用中心 UI 手动安装。
+> 本节以上历史经验（含「`jiuwenswarm.fpk` 是测试包的硬链」描述）为旧双包策略下的过程记录，形态已随 test 档位移除
+> （决策记录见 `docs/BUILD.md` §3.1）。
+
 ---
 
 ## 3. wheel 指纹与升级重建："版本号相同"不等于"内容相同"
@@ -216,7 +222,7 @@ grep -c "frame-ancestors 'none'" <var>/venv/lib/python3.12/site-packages/jiuwens
 `runtime.sh` 的幂等判定原本只比 pip 元数据版本：
 
 ```bash
-have="$("${JW_VENV}/bin/python" -c 'import jiuwenswarm, importlib.metadata as m; print(m.version("workswarm"))')"
+have="$(${JW_VENV}/bin/python" -c 'import jiuwenswarm, importlib.metadata as m; print(m.version("workswarm"))')"
 [ "${have}" = "${want}" ] && return 0      # 版本相同 ⇒ 跳过重建
 ```
 
@@ -773,7 +779,7 @@ BUILD_PROFILE=appstore TMPDIR=$HOME/fnpack-tmp FNPACK=/tmp/fnpack bash scripts/b
 - [ ] 源码仓 `git status --porcelain` 为空
 - [ ] 补丁脚本有 `--check`，匹配不到就 `exit 1`
 - [ ] 产物过 `verify-package-freshness.py`（逐字节）
-- [ ] profile 断言：测试包无 `install_dep_apps`，上架包必须有
+- [ ] install_dep_apps 断言：包内必须含 `install_dep_apps=python312`（应用中心档位，唯一产物）
 - [ ] `TMPDIR` 指向大分区；暂存目录硬链接；改 manifest 先删再写
 - [ ] 记录产物 `ls -l` 字节数与 `sha256sum`（**同一批命令内取**，避免字节数与 sha 来自不同次构建）
 
@@ -818,9 +824,8 @@ BUILD_PROFILE=appstore TMPDIR=$HOME/fnpack-tmp FNPACK=/tmp/fnpack bash scripts/b
 ## 附录 B：命令速查
 
 ```bash
-# 构建（测试包 / 上架包）
+# 构建（应用中心包，唯一档位；BUILD_PROFILE 仅接受 appstore/不设置）
 TMPDIR=$HOME/fnpack-tmp FNPACK=/tmp/fnpack bash scripts/build-fpk.sh
-BUILD_PROFILE=appstore TMPDIR=$HOME/fnpack-tmp FNPACK=/tmp/fnpack bash scripts/build-fpk.sh
 
 # 校验包内文件是否等于工作区
 python3 scripts/verify-package-freshness.py jiuwenswarm-0.2.9-12.fpk .
