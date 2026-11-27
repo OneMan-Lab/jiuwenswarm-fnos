@@ -60,7 +60,7 @@ croniter-6.2.4-py3-none-any.whl	6.2.4	8ef3d544107a5c05a150a2d78f8bf5a8eb9c5c4d93
 cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl	50.0.2	9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079
 culsans-0.11.0-py3-none-any.whl	0.11.0	278d118f63fc75b9db11b664b436a1b83cc30d9577127848ba41420e66eb5a47
 cycler-0.12.1-py3-none-any.whl	0.12.1	85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30
-cyclopts-5.5.3-py3-none-any.whl	5.5.3	301925cfb9c7df0607df2e2ed4a937cf39e2cc0d312e74d8be6a8e40b7a92e75
+cyclopts-5.5.3-py3-none-any.whl	5.5.3	61c5713c34fe161430bae6ced2de0ed29b60d0893ac0d9c3490a77aa8899068d
 dashscope-2.1.1-py3-none-any.whl	2.1.1	fdabe219716d8bcd34cdc47174d58a678c1ed3d3092db58d153d7922fa4bf542
 dateparser-1.5.1-py3-none-any.whl	1.5.1	1d312d2dbc3cddd61fe96d336af733b54bd01d7beb5657a432c7d1c2a144a5c8
 dingtalk_stream-0.24.3-py3-none-any.whl	0.24.3	2160403656985962878bf60cdf5adf41619f21067348e06f07a7c7eebf5943ad
@@ -152,7 +152,7 @@ openjiuwen_computeruse-0.0.1-cp312-cp312-linux_x86_64.whl	0.0.1	0ae3d24f9c187b89
 openjiuwen_e2a-0.3.0-py3-none-any.whl	0.3.0	d42838468cdc04cf8c3a5c9e9642617e7b46400f5755fc31c77978097d14e9bf
 openjiuwen_runtime_foundation-0.1.2b1-py3-none-any.whl	0.1.2b1	773240be07e19afd358000c7913e0de93f0e5ed4fd4457683cd4d4add8a568ce
 openjiuwen_security-0.0.1b2-py3-none-any.whl	0.0.1b2	c67080c2abaa3f58359b1979c94c5a43309c6f242421931569e3d8b6e6bb70a9
-openpyxl-3.1.5-py2.py3-none-any.whl	3.1.5	5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb0e8e8c2a5f24df5c
+openpyxl-3.1.5-py2.py3-none-any.whl	3.1.5	5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2
 opentelemetry_api-1.45.2-py3-none-any.whl	1.45.2	2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34
 opentelemetry_exporter_http_transport-0.66b2-py3-none-any.whl	0.66b2	fd5f5b490c099acda1cd7b909d5e8981436bf18cc8c6098d302d114c271720e9
 opentelemetry_exporter_otlp_common-0.66b2-py3-none-any.whl	0.66b2	ace86efb75489f925f1ef809856ae5f0c7db534e4afdc624530222228b1236a5
@@ -214,6 +214,7 @@ python_dotenv-1.2.4-py3-none-any.whl	1.2.4	42269a8a5b3fd54ffa6f3d84b18abed500647
 python_multipart-0.0.34-py3-none-any.whl	0.0.34	ebacd224bd686eee2f9aa1066a657affe07435a185834e05e5235e2e59173e91
 python_pptx-1.0.2-py3-none-any.whl	1.0.2	160838e0b8565a8b1f67947675886e9fea18aa5e795db7ae531606d68e785cba
 python_socks-2.8.2-py3-none-any.whl	2.8.2	7cf785d0631e0659384a773b3c402bc22cccdc23894ba1d65f8524748ace1193
+python_telegram_bot-22.1-py3-none-any.whl	22.1	71afd091fde9037ac44728c2768eb958682140dcc350900a191da0e9cef319d3
 pytz-2026.6-py2.py3-none-any.whl	2026.6	7fed3fee8fd6bd4a2b7b75a8d56021d0624127bf69bd5691f115db929ac570b3
 pyxlsb-1.0.10-py2.py3-none-any.whl	1.0.10	87c122a9a622e35ca5e741d2e541201d28af00fb46bec492cfa9586890b120b4
 pyyaml-6.0.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl	6.0.4	93bfb2459195406a518e2f487a9bbf01df240175f31e06f5a252ac6734c7bbf0
@@ -253,6 +254,7 @@ tree_sitter_bash-0.25.1-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.ma
 tree_sitter_batch-0.11.1-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl	0.11.1	03957e781f130e76843531719d731519db9eb1e8981c5ded44923b872b87f4b9
 tree_sitter_pwsh-0.38.1-cp310-abi3-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl	0.38.1	0ffe5b41624927a67f650b430e206589fd3a629e4b59f45bd559aadc6c8805cb
 truststore-0.10.5-py3-none-any.whl	0.10.5	9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c
+typer-0.29.3-py3-none-any.whl	0.29.3	1fd37275046faecc86caa2e0e313978c10db71533fc0fe1a48f4e03a60efc23c
 typing_extensions-4.16.0-py3-none-any.whl	4.16.0	481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
 typing_inspection-0.4.5-py3-none-any.whl	0.4.5	bc210535442b39e1bf2805e0c7a17dfd6a4ace760c84c7f7d16245d23a6b1c39
 tzdata-2026.6-py2.py3-none-any.whl	2026.6	0a10eec6e13ef16b627fabed9a5f2ba61a62b1c67f327305f4e7e412a70b4aec
@@ -271,7 +273,7 @@ websockets-15.0.1-cp312-cp312-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2
 wecom_aibot_sdk-1.0.8-py3-none-any.whl	1.0.8	9577742c1b9d76232ece675342871e26c3f5a9d9617c7f860f951e2c6265c184
 wheel-0.48.0-py3-none-any.whl	0.48.0	3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab
 workswarm-0.2.9b5-py3-none-any.whl	0.2.9b5	e7159ffbf4cc147d7ba672d7c2912ee83617fe1dd34b826a6aceb42d3bf732c7
-wrapt-2.5.2-cp312-cp312-manylinux_2_28_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl	2.5.2	092472b7b1494deef40dac5e9f6295013a9d51b112b5fbc4350f64dc2574e46a
+wrapt-2.5.2-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl	2.5.2	092472b7b1494deef40dac5e9f6295013a9d51b112b5fbc4350f64dc2574e46a
 xlrd-2.0.2-py2.py3-none-any.whl	2.0.2	ea762c3d29f4cca48d82df517b6d89fbce4db3107f9d78713e48cd321d5c9aa9
 xlsxwriter-3.3.4-py3-none-any.whl	3.3.4	da62fecb24fdd0f003c874c86109b9e1245ae89533052745ab85a085eb2b04d7
 yarl-1.25.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl	1.25.1	c6f117789d22dce188e5754e8bc65b7e6ebf8cb73963b9fa761f672a5883769d
