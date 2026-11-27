@@ -1,6 +1,6 @@
 #!/bin/bash
 # scripts/verify-fpk.sh —— 校验 .fpk 结构与关键载荷（不安装、不改设备）
-# 用法：bash scripts/verify-fpk.sh jiuwenswarm.fpk
+# 用法：bash scripts/verify-fpk.sh jiuwenswarm-0.2.9-12.fpk
 set -euo pipefail
 
 FPK="${1:-}"

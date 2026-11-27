@@ -59,6 +59,7 @@ run/
 # ── 团队内部协作文件（不发布） ──
 /fnos-app-team/
 /dist-docs/
+/.codeartsdoer/
 /.redact_kb.py
 /.qa-tmp/
 /.tmp/
