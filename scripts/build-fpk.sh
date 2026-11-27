@@ -66,8 +66,9 @@ mkdir -p "${STAGE}"
 cp -al "${APP_DIR}/." "${STAGE}/" 2>/dev/null || cp -a "${APP_DIR}/." "${STAGE}/"
 rm -f "${STAGE}"/*.fpk 2>/dev/null || true
 
-# 按 profile 生成暂存目录里的 manifest（先删再写，打断硬链接，不影响工作区）
+# 按 profile 生成暂存目录里的 manifest（写临时文件后 os.replace 原子替换，打断硬链接，不影响工作区）
 "${PYTHON_OR_PY:-python3}" - "${STAGE}/manifest" "${PROFILE}" <<'PY'
+import os
 import sys
 from pathlib import Path
 
@@ -86,7 +87,13 @@ if profile == "appstore":
     if not inserted:
         out.append("install_dep_apps=python312")
     lines = out
-path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+text = "\n".join(lines) + "\n"
+# 硬链接暂存下 path 与工作区 manifest 共享同一 inode：直接 write_text 会原地截断重写，
+# 静默删掉工作区 manifest 的 install_dep_apps 行（Q-01）。先写临时文件（新建 inode），
+# 再以 os.replace 原子替换，替换后 path 指向新 inode，工作区文件不再受影响。
+tmp = path.with_name("manifest.tmp")
+tmp.write_text(text, encoding="utf-8")
+os.replace(tmp, path)
 PY
 
 echo "[build-fpk] manifest 差异："

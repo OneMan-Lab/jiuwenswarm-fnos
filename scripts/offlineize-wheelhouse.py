@@ -87,20 +87,23 @@ def rewrite_metadata(text: str, index: dict[str, list[tuple[str, Path]]]) -> tup
 def write_wheel(wheel: Path, replacements: dict[str, bytes]) -> None:
     tmp = wheel.with_suffix(".whl.tmp")
     records: list[tuple[str, str, str]] = []
-    with zipfile.ZipFile(wheel) as src, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as dst:
-        for item in src.infolist():
-            if item.filename.endswith(".dist-info/RECORD"):
-                continue
-            data = replacements.get(item.filename, src.read(item.filename))
-            dst.writestr(item, data)
-            digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
-            records.append((item.filename, f"sha256={digest}", str(len(data))))
-    record_name = next(
-        (n for n in zipfile.ZipFile(tmp).namelist() if n.endswith(".dist-info/RECORD")), None
-    )
-    if record_name is None:
-        tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"{wheel.name} 缺少 RECORD")
+    with zipfile.ZipFile(wheel) as src:
+        # RECORD 名只能取自原 wheel：下方写出循环会剔除 RECORD 成员，tmp 中必然没有，
+        # 若从 tmp 查找则任何改写都会误报"缺少 RECORD"。
+        record_name = next(
+            (n for n in src.namelist() if n.endswith(".dist-info/RECORD")), None
+        )
+        if record_name is None:
+            # 此刻 tmp 尚未创建，失败不留半成品（spec 5.2 规则 6）
+            raise RuntimeError(f"{wheel.name} 缺少 RECORD")
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as dst:
+            for item in src.infolist():
+                if item.filename.endswith(".dist-info/RECORD"):
+                    continue
+                data = replacements.get(item.filename, src.read(item.filename))
+                dst.writestr(item, data)
+                digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+                records.append((item.filename, f"sha256={digest}", str(len(data))))
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
     writer.writerows(records)
