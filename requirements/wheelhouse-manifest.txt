@@ -61,7 +61,7 @@ cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl	50.0.2	9dab55f57c74c3ca
 culsans-0.11.0-py3-none-any.whl	0.11.0	278d118f63fc75b9db11b664b436a1b83cc30d9577127848ba41420e66eb5a47
 cycler-0.12.1-py3-none-any.whl	0.12.1	85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30
 cyclopts-5.5.3-py3-none-any.whl	5.5.3	61c5713c34fe161430bae6ced2de0ed29b60d0893ac0d9c3490a77aa8899068d
-dashscope-2.1.1-py3-none-any.whl	2.1.1	fdabe219716d8bcd34cdc47174d58a678c1ed3d3092db58d153d7922fa4bf542
+dashscope-2.1.2-py3-none-any.whl	2.1.2	908add85ec0bd15ddc2ff54a19a52cec7289a19df7e2eb906c051e3e73a24464
 dateparser-1.5.1-py3-none-any.whl	1.5.1	1d312d2dbc3cddd61fe96d336af733b54bd01d7beb5657a432c7d1c2a144a5c8
 dingtalk_stream-0.24.3-py3-none-any.whl	0.24.3	2160403656985962878bf60cdf5adf41619f21067348e06f07a7c7eebf5943ad
 discord_py-2.7.1-py3-none-any.whl	2.7.1	849dca2c63b171146f3a7f3f8acc04248098e9e6203412ce3cf2745f284f7439
@@ -106,7 +106,7 @@ httpx_sse-0.4.3-py3-none-any.whl	0.4.3	0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b607
 huggingface_hub-2.5.0-py3-none-any.whl	2.5.0	f8565260f2031f5a62301d01d8d80bf6f889390f3c3f1b1cfe6d7e10b5a02db8
 hyperframe-6.1.0-py3-none-any.whl	6.1.0	b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5
 idna-3.20-py3-none-any.whl	3.20	ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
-imageio_ffmpeg-0.8.1-py3-none-manylinux_2_28_x86_64.whl	0.8.1	050d6850601c3b3890bd2b28306f3b842b3daea390a561101174375a1c460bda
+imageio_ffmpeg-0.8.2-py3-none-manylinux_2_28_x86_64.whl	0.8.2	4749aa8d7c46c0c194373e97d0dba0b8cee66cd1c4fcea84a91ac37d46f79dc1
 importlib_resources-7.1.0-py3-none-any.whl	7.1.0	1bd7b48b4088eddb2cd16382150bb515af0bd2c70128194392725f82ad2c96a1
 intelli_router-0.1.0b1-py3-none-any.whl	0.1.0b1	64c573e2f380907d9793441fd9ff54a82c72014d2d34a7cf69d168f2f2a0fe19
 jaraco.classes-3.4.0-py3-none-any.whl	3.4.0	f662826b6bed8cace05e7ff873ce0f9283b5c924470fe664fff1c2f00f581790
