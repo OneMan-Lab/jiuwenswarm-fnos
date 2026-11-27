@@ -1,0 +1,170 @@
+# GitHub Actions：构建 JiuwenSwarm 的 fnOS 安装包（.fpk）
+#
+# 本工作流只是仓库既有构建链路的 CI 封装，不引入新的构建方式：
+#   上游源码(gitcode, 钉死提交) → scripts/build-payload.sh（前端 dist + 262 离线 wheel）
+#                              → scripts/build-fpk.sh（CSP/logo 补丁闸门 + profile + fnpack + 新鲜度校验）
+# 依据：
+#   - 构建链路与前置条件：docs/BUILD.md §1/§2/§3、README.md §5/§6
+#   - 构建机要求（x86_64 + Python 3.12 + Node>=20 + npm + git）：scripts/build-payload.sh:4-6,24-31
+#   - fnpack 1.3.3 安装地址：scripts/build-fpk.sh:32、docs/BUILD.md:203
+#   - 双 profile 语义（test 无依赖声明 / appstore 含 install_dep_apps=python312）：scripts/build-fpk.sh:12-15,167-176
+#   - 上游提交钉死：README.md:12,147-148、docs/BUILD.md:41-48
+
+name: Build fnOS .fpk
+
+on:
+  # 1) 手动触发：可选构建 profile 与上游提交
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "构建 profile：both=测试包+上架包 / test / appstore"
+        type: choice
+        options:
+          - both
+          - test
+          - appstore
+        default: both
+      upstream_commit:
+        description: "上游 JiuwenSwarm 提交（默认取仓库钉死值，见 README.md:12）"
+        type: string
+        default: "7b95d38f2ac56acc5efe07e17e371cc3a8804376"
+  # 2) tag 推送（如 v0.2.9-12）：构建双包并附加到 Release
+  push:
+    tags:
+      - "v*"
+
+# gh release create/upload 需要写权限（仅 tag 触发时使用）
+permissions:
+  contents: write
+
+env:
+  # 上游仓库与钉死提交（README.md:12 / docs/BUILD.md:41-48）。tag 触发时 github.event.inputs 为空，回退到默认值。
+  UPSTREAM_REPO: https://gitcode.com/openJiuwen/jiuwenswarm.git
+  UPSTREAM_COMMIT: ${{ github.event.inputs.upstream_commit || '7b95d38f2ac56acc5efe07e17e371cc3a8804376' }}
+  REQUESTED_PROFILE: ${{ github.event.inputs.profile || 'both' }}
+  FNPACK_VERSION: "1.3.3"
+  # 与 scripts/build-payload.sh:13 的默认一致，可在此覆盖
+  PIP_INDEX: https://pypi.tuna.tsinghua.edu.cn/simple
+
+jobs:
+  build:
+    name: Build .fpk (x86_64 / Python 3.12)
+    # 目标设备为 x86_64（manifest:6 platform=x86），必须用 x86_64 runner（scripts/build-payload.sh:25-26）
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout 适配层仓库
+        uses: actions/checkout@v4
+
+      # 与设备运行时 python312 对齐（scripts/build-payload.sh:27-31 硬校验 3.12.x）
+      - name: 安装 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 仅构建期需要 Node 构建前端（scripts/build-payload.sh:21,33-45）
+      - name: 安装 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # 构建机前置校验：架构 / Python / Node / npm / git（scripts/build-payload.sh:19-31）
+      - name: 构建机前置校验
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          [ "$arch" = "x86_64" ] || { echo "需要 x86_64 runner，当前为 $arch"; exit 1; }
+          python3 -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)' \
+            || { echo "需要 Python 3.12.x"; exit 1; }
+          node --version
+          npm --version
+          git --version
+          echo "前置校验通过：arch=$arch python=$(python3 --version)"
+
+      # fnpack 1.3.3（scripts/build-fpk.sh:32、docs/BUILD.md:203）
+      - name: 安装 fnpack ${FNPACK_VERSION}
+        run: |
+          set -euo pipefail
+          curl -fL "https://static2.fnnas.com/fnpack/fnpack-${FNPACK_VERSION}-linux-amd64" -o "$RUNNER_TEMP/fnpack"
+          chmod +x "$RUNNER_TEMP/fnpack"
+          "$RUNNER_TEMP/fnpack" --version
+
+      # 上游源码必须钉死在固定提交（docs/BUILD.md:41-48）；克隆到 runner.temp，避免污染仓库工作区
+      - name: 取得上游 JiuwenSwarm 源码（钉死提交）
+        run: |
+          set -euo pipefail
+          git clone "$UPSTREAM_REPO" "$RUNNER_TEMP/jiuwenswarm"
+          git -C "$RUNNER_TEMP/jiuwenswarm" checkout "$UPSTREAM_COMMIT"
+          git -C "$RUNNER_TEMP/jiuwenswarm" log -1 --format='%H %ci %s'
+          # 上游仓必须保持只读（docs/BUILD.md:58）
+          git -C "$RUNNER_TEMP/jiuwenswarm" status --porcelain
+
+      # 发布前敏感信息门禁：0 未解释命中才继续（docs/BUILD.md:321-327）
+      - name: 敏感信息门禁
+        run: python3 -B scripts/sensitive-scan.py --strict .
+
+      # 阶段 1：构造载荷 —— 前端 dist + 262 个离线 wheel（scripts/build-payload.sh）
+      # JIUENSWARM_SRC 覆盖默认的 ../jiuwenswarm 约定（scripts/build-payload.sh:11）
+      - name: 构造载荷（前端 dist + 离线 wheel）
+        env:
+          JIUENSWARM_SRC: ${{ runner.temp }}/jiuwenswarm
+        run: bash scripts/build-payload.sh
+
+      # 阶段 2：打包 .fpk —— 按 profile 逐个构建（scripts/build-fpk.sh）
+      # 每个 profile 内部已包含：CSP 补丁闸门、logo 补丁闸门、新鲜度校验、profile 断言、verify-fpk.sh
+      - name: 打包 .fpk
+        env:
+          FNPACK: ${{ runner.temp }}/fnpack
+          TMPDIR: ${{ runner.temp }}/fnpack-tmp
+        run: |
+          set -euo pipefail
+          mkdir -p "$TMPDIR"
+          case "$REQUESTED_PROFILE" in
+            both)    profiles="test appstore" ;;
+            test)    profiles="test" ;;
+            appstore) profiles="appstore" ;;
+            *) echo "非法 profile: $REQUESTED_PROFILE"; exit 2 ;;
+          esac
+          for p in $profiles; do
+            echo "=== 构建 profile=$p ==="
+            BUILD_PROFILE="$p" bash scripts/build-fpk.sh
+          done
+
+      # 版本号与 manifest 保持一致（build-fpk.sh:56 同一口径），并记录产物指纹
+      - name: 记录版本与 sha256
+        id: artifacts
+        run: |
+          set -euo pipefail
+          version="$(grep -E '^version[[:space:]]*=' manifest | head -n1 | sed -E 's/^[^=]+=[[:space:]]*//; s/[[:space:]]+$//')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "应用版本（来自 manifest）= $version"
+          ls -lh jiuwenswarm-*.fpk
+          sha256sum jiuwenswarm-*.fpk | tee SHA256SUMS.txt
+
+      # 产物上传（.fpk 已是 gzip 压缩包，compression-level: 0 仅打包不再压）
+      - name: 上传 .fpk 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: jiuwenswarm-fpk-${{ steps.artifacts.outputs.version }}
+          path: |
+            jiuwenswarm-*.fpk
+            SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+
+      # 仅 tag 触发时把产物附到 Release（需要 permissions.contents: write）
+      - name: 附加产物到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" jiuwenswarm-*.fpk SHA256SUMS.txt --clobber
+          else
+            gh release create "$tag" jiuwenswarm-*.fpk SHA256SUMS.txt \
+              --title "$tag" \
+              --notes "JiuwenSwarm fnOS 应用包 ${tag}（CI 自动构建；未签名，见仓库 docs/BUILD.md §3.1）"
+          fi
