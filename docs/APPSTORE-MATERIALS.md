@@ -20,7 +20,7 @@
 | A1-11 | `changelog` | 首个飞牛 fnOS 版本：统一网关入口 /app/jiuwenswarm，离线 wheel 集安装，数据落应用数据目录 | `manifest:22` |
 | A1-12 | `ctl_stop` | `true` | 服务型，允许用户启停 |
 | A1-13 | `install_type` | 未声明（用户选存储位置） | 默认行为 |
-| A1-14 | `install_dep_apps` | **不声明** | 带依赖的包会被 CLI 安全闸拦截（实测）；改为 README/材料写前置依赖 + 运行时探测 Python 3.12；规范无「软依赖」字段 |
+| A1-14 | `install_dep_apps` | **声明 `install_dep_apps=python312`** | 工作区 `manifest:21` 即上架形态（历史 test 包由构建期暂存删行得到，该形态已随 test 档位移除）；CLI 安全闸对带依赖包拦截（实测），唯一安装通道为应用中心 UI；运行时探测见 A7-01 |
 | A1-15 | `desktop_uidir` / `desktop_applaunchname` | `ui` / `jiuwenswarm.main` | 与 `app/ui/config` 中入口 ID 完全一致 |
 | A1-16 | `service_port` / `checkport` | **不声明** / `false` | 网关型不得声明 service_port（上架门禁 R1） |
 | A1-17 | `disable_authorization_path` | `true` | 不访问用户目录，不申请授权路径 |
@@ -74,9 +74,9 @@
 
 | # | 项 | 内容 |
 |---|---|---|
-| A7-01【官方】 | 运行时依赖 | **未声明 `install_dep_apps`**（CLI 安全闸拦截带依赖的包）；`init_env.sh` 依次探测 `/var/apps/python312/target/bin/python3` → `python3.12` → `python3` 并校验主版本 3.12，找到后注入 PATH；缺失时 `cmd/main start` 写明确错误、`status=3` |
+| A7-01【官方】 | 运行时依赖 | **声明 `install_dep_apps=python312`**，应用中心 UI 安装时自动处理依赖；`init_env.sh` 依次探测 `/var/apps/python312/target/bin/python3` → `python3.12` → `python3` 并校验主版本 3.12，找到后注入 PATH；缺失时 `cmd/main start` 写明确错误、`status=3` |
 | A7-02【官方】 | 中间件依赖 | **无**（未使用 redis/minio/rabbitmq；不使用外部数据库） |
-| A7-03【官方】 | 依赖顺序 | 单依赖，无顺序问题（且未在 manifest 声明） |
+| A7-03【官方】 | 依赖顺序 | 单依赖，无顺序问题（manifest 已声明 `install_dep_apps=python312`，应用中心 UI 安装时自动处理） |
 | A7-04【官方】 | API Scope | **无**：不调用飞牛开放 API，`config/resource` 为 `{}`；不申请 `trim.file.*` / `trim.system.*`；**不读写用户共享目录，仅访问应用自有数据目录** |
 | — | 共享目录 | **无** `data-share`；不读写用户共享目录 |
 | — | 网络出站 | 运行期仅访问用户配置的模型 API（由用户填写 endpoint），以及可选能力的运行时下载（默认不启用） |
@@ -99,11 +99,10 @@
 
 | 项 | 值 |
 |---|---|
-| 测试包 | `jiuwenswarm-0.2.9-12.fpk`（不含 install_dep_apps；sha256 `9843091c0ed403cd6742261f097a83240cb861f86f0edaabcb7c57284e85f5e8`） |
-| **上架包** | `jiuwenswarm-0.2.9-12-appstore.fpk`（含 `install_dep_apps=python312`；sha256 `8794fbe424cf3b765075e27f293d966718ece9b3c6b0dc83c7b87bcb0eef9b30`；**未经真机验证**） |
-| 大小 | 各约 **482.7 MB**（460.3 MiB）；测试包 482,702,946 B / 上架包 482,702,918 B（相差 28 B） |
+| **唯一产物（应用中心包）** | `jiuwenswarm-0.2.9-12.fpk`（含 `install_dep_apps=python312`；sha256 **待新构建后填写（未经真机验证）**；大小待新构建后填写） |
+| 历史产物 sha256（注记） | 旧双包命名、**均已停止构建**，不得冒充新包指纹——测试包 `jiuwenswarm-0.2.9-12.fpk`（旧语义，不含 install_dep_apps）sha256 `9843091c0ed403cd6742261f097a83240cb861f86f0edaabcb7c57284e85f5e8`；上架包 `jiuwenswarm-0.2.9-12-appstore.fpk` sha256 `8794fbe424cf3b765075e27f293d966718ece9b3c6b0dc83c7b87bcb0eef9b30` |
 | 签名 | 正式提交需开发者证书签名（`fnpack build`，不带 `--nosign`） |
-| 安装命令 | `app install-fpk <包> --volume-id 1 --accept-license`（无需 `--custom-parameters`） |
+| 安装方式 | 应用中心 UI 手动安装（CLI `app install-fpk` 被安全闸拦截，历史通道已不可用） |
 
 ## A9. 提交渠道与测试材料
 
@@ -131,7 +130,7 @@
 
 | 项 | 数值 |
 |---|---|
-| `.fpk` | 约 482.7 MB（460.3 MiB）；两个包体积差 28 B |
+| `.fpk` | 历史双包形态约 482.7 MB（460.3 MiB，差 28 B）；唯一产物体积待新构建后复核 |
 | 安装后安装卷（target/wheelhouse） | 约 0.5 GB |
 | 安装后数据卷（venv + 首启 data） | 约 2 GB |
 | 升级瞬间峰值（旧 venv + venv.new + wheelhouse） | 约 3–3.8 GB |

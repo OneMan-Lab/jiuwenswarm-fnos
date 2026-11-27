@@ -38,14 +38,14 @@ fnOS 要求的是另一种形态——**应用包 + 平台托管生命周期 + �
 
 | 能力 | 状态 | 说明 |
 |---|---|---|
-| 构建 `.fpk`（测试包 / 上架包） | **已验证（构建机实测）** | 双 profile，唯差异是 `install_dep_apps` 一行 |
-| 真机安装（命令行 `install-fpk`） | **已验证** | 测试包，x86 设备 |
+| 构建 `.fpk`（应用中心包，唯一产物） | **已验证（构建机实测）** | 历史双包形态（0.2.9-12 及以前）实测；本轮单包化后的新命名产物待重新构建验证 |
+| 真机安装（命令行 `install-fpk`） | **已验证（历史事实）** | 0.2.9-12 测试包经命令行安装验证（该测试包已停止构建） |
 | 真机启动 / 入口 / 管理员门禁 | **已验证** | `version=0.2.9-12`、`running`、入口 `/app/jiuwenswarm` |
 | 门户 iframe 打开 | **已验证** | 修 CSP 后不白屏 |
 | IP 访问下 WebSocket 对话 | **行为层已验证（双向收发成功）**；`101` 协议层**未取得** | 用户侧能对话、桥侧分支标记命中；无有效会话时请求停在网关鉴权层，抓不到握手响应（见 §8.3 与下行） |
 | 域名 / DDNS 访问下 WebSocket | **已验证（fnos DDNS，行为层）** | 需网关转发 `X-Forwarded-*`；**其他自定义域名（含内网 `*.local`）未单独实测**，机制上同走代理头分支，见 §8 |
 | `/ws` 返回 `101` 的**协议层**证据 | **未取得** | 无有效会话时请求停在网关鉴权层，抓不到握手响应；当前结论只到「双向收发成功」的行为层，见 §8.3 |
-| 应用中心 UI 安装（上架包，依赖 `python312` 自动安装） | **未验证** | 只验过命令行测试包 |
+| 应用中心 UI 安装（唯一产物，依赖 `python312` 自动安装） | **未验证** | 唯一产物 `jiuwenswarm-0.2.9-12.fpk` 待新构建后经应用中心 UI 安装验证 |
 | 「保留数据升级」通道（`upgrade_callback`） | **未验证（通道本身不成立）** | 本应用不在商店，CLI 对已装应用直接拒（`10236`），无更新入口 |
 | 卸载「清除全部应用数据」 | **代码已修，真机未重验** | 0.2.9-10 起修（参数归一化 + fail-open + 恒 `exit 0`）；判据见 §9 |
 | 飞牛外网中继域名（厂商 DDNS）后续固件是否继续带 `X-Forwarded-*` | **未验证** | 若不再带，桥会降级为 `fallback` 放行 + WARN（功能不退化，本地防线不生效） |
@@ -101,7 +101,7 @@ fnOS 要求的是另一种形态——**应用包 + 平台托管生命周期 + �
 
 | 文件 | 作用 | 关键点 |
 |---|---|---|
-| `manifest` | 平台识别应用 | `platform=x86`；`os_min_version=1.1.3100`；`checkport=false`；`ctl_stop=true`；`install_dep_apps=python312`（仅上架包） |
+| `manifest` | 平台识别应用 | `platform=x86`；`os_min_version=1.1.3100`；`checkport=false`；`ctl_stop=true`；`install_dep_apps=python312`（上架形态，唯一产物） |
 | `config/privilege` | 运行身份 | `run-as: package`，全程非 root |
 | `config/resource` | 资源声明 | `{}` —— 本应用不申请共享目录、不申请硬件 |
 | `app/ui/config` | 桌面入口 | `type: iframe`、`gatewayPrefix: /app/jiuwenswarm`、`gatewaySocket: app.sock`、`allUsers: false`（仅管理员） |
@@ -150,17 +150,15 @@ git -C ../jiuwenswarm checkout 7b95d38f2ac56acc5efe07e17e371cc3a8804376   # 0.2.
 # 1) 构造载荷：前端 dist + 262 个离线 wheel（联网，约 20–40 分钟）
 bash scripts/build-payload.sh
 
-# 2) 打 .fpk（自动跑 CSP / logo 补丁闸门 + manifest profile + 新鲜度校验）
+# 2) 打 .fpk（自动跑 CSP / logo 补丁闸门 + manifest 断言 + 新鲜度校验；唯一应用中心档位）
 TMPDIR=$HOME/fnpack-tmp FNPACK=/path/to/fnpack bash scripts/build-fpk.sh
-BUILD_PROFILE=appstore TMPDIR=$HOME/fnpack-tmp FNPACK=/path/to/fnpack bash scripts/build-fpk.sh
 ```
 
-产出的两个包**语义不同，别装错**：
+产出的唯一包为**应用中心包**：
 
 | 产物 | `install_dep_apps` | 适用通道 |
 |---|---|---|
-| `jiuwenswarm-0.2.9-12.fpk`（测试包） | 无 | 命令行 `install-fpk` / UI 均可 |
-| `jiuwenswarm-0.2.9-12-appstore.fpk`（上架包） | `python312` | **仅应用中心 UI**（命令行安全闸会拦截带依赖的包） |
+| `jiuwenswarm-0.2.9-12.fpk`（应用中心包，唯一产物） | `python312` | **仅应用中心 UI**（命令行安全闸会拦截带依赖的包；历史测试包与 CLI 安装通道已随单包化决策取消） |
 
 > 说明：`fnpack build` 把产物写到**当前工作目录**（与 `-d` 无关），`scripts/build-fpk.sh` 已在暂存目录内 `cd` 后再执行；
 > 暂存目录用硬链接复制（`cp -al`），不会复制 468 MB 的 wheelhouse。
@@ -171,12 +169,16 @@ BUILD_PROFILE=appstore TMPDIR=$HOME/fnpack-tmp FNPACK=/path/to/fnpack bash scrip
 
 ### 7.1 普通用户路径（推荐，无需命令）
 
-1. 应用中心 → **手动安装** → 选择 `.fpk`（上架包或测试包均可）；
+1. 应用中心 → **手动安装** → 选择 `.fpk`（唯一产物，manifest 已声明 `install_dep_apps=python312`）；
 2. 若提示缺运行时：先在应用中心安装 **`python312`**，再重试；
 3. 安装完成后应用会自动启动（设备默认 `autoRunNewApp=true`）；
 4. 用**管理员账号**登录 fnOS，点桌面 JiuwenSwarm 卡片。
 
-### 7.2 命令行路径（测试包）
+### 7.2 命令行路径（历史通道，已不可用）
+
+> 历史事实：以下命令仅对已停止构建的历史测试包（0.2.9-12 及以前的双包形态）验证过。
+> 单包化后唯一产物含 `install_dep_apps=python312`，CLI `app install-fpk` 会触发安全闸拦截（带依赖的包），
+> 真机安装统一走 §7.1 应用中心 UI 手动安装。
 
 ```bash
 app install-fpk jiuwenswarm-0.2.9-12.fpk --volume-id 1 --dry-run        # 预演，不落盘
