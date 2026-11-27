@@ -99,8 +99,8 @@
 
 | 项 | 值 |
 |---|---|
-| **唯一产物（应用中心包）** | `jiuwenswarm-0.2.9-12.fpk`（含 `install_dep_apps=python312`；sha256 **待新构建后填写（未经真机验证）**；大小待新构建后填写） |
-| 历史产物 sha256（注记） | 旧双包命名、**均已停止构建**，不得冒充新包指纹——测试包 `jiuwenswarm-0.2.9-12.fpk`（旧语义，不含 install_dep_apps）sha256 `9843091c0ed403cd6742261f097a83240cb861f86f0edaabcb7c57284e85f5e8`；上架包 `jiuwenswarm-0.2.9-12-appstore.fpk` sha256 `8794fbe424cf3b765075e27f293d966718ece9b3c6b0dc83c7b87bcb0eef9b30` |
+| **唯一产物（应用中心包）** | `jiuwenswarm-0.2.9-12.fpk`（含 `install_dep_apps=python312`；sha256 `a0363379e7540477e707511994165f90c2671a1982b7f4a5498adb904b92ea2a`，来自 CI run `46028608438`；约 485.7 MB / 463.2 MiB；**已通过脚本与 CI 校验，未经真机安装验证**） |
+| 历史产物 sha256（注记） | 旧构建、**均已停止构建**，其内容与同名新包不同，不得冒充新包指纹——旧测试包 `jiuwenswarm-0.2.9-12.fpk`（同名但旧语义，不含 install_dep_apps）sha256 `9843091c0ed403cd6742261f097a83240cb861f86f0edaabcb7c57284e85f5e8`；旧上架包 `jiuwenswarm-0.2.9-12-appstore.fpk` sha256 `8794fbe424cf3b765075e27f293d966718ece9b3c6b0dc83c7b87bcb0eef9b30` |
 | 签名 | 正式提交需开发者证书签名（`fnpack build`，不带 `--nosign`） |
 | 安装方式 | 应用中心 UI 手动安装（CLI `app install-fpk` 被安全闸拦截，历史通道已不可用） |
 
@@ -130,7 +130,7 @@
 
 | 项 | 数值 |
 |---|---|
-| `.fpk` | 历史双包形态约 482.7 MB（460.3 MiB，差 28 B）；唯一产物体积待新构建后复核 |
+| `.fpk` | 历史双包形态约 482.7 MB；唯一产物（CI run `46028608438`）约 485.7 MB（463.2 MiB） |
 | 安装后安装卷（target/wheelhouse） | 约 0.5 GB |
 | 安装后数据卷（venv + 首启 data） | 约 2 GB |
 | 升级瞬间峰值（旧 venv + venv.new + wheelhouse） | 约 3–3.8 GB |
