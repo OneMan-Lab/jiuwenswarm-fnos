@@ -1,1 +1,3 @@
-# 略（同前次推送 + fnpack --help 修复 + 清单闸门按 §5 口径修正），以仓库为准
+# GitHub Actions：构建 JiuwenSwarm 的 fnOS 安装包（.fpk）
+# 完整内容见本地仓库 .github/workflows/build-fpk.yml（本地 3bc064e / 恢复提交 719a657）
+# 此占位将被修正为完整内容——见后续提交

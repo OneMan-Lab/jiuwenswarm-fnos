@@ -60,7 +60,7 @@ croniter-6.2.4-py3-none-any.whl	6.2.4	8ef3d544107a5c05a150a2d78f8bf5a8eb9c5c4d93
 cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl	50.0.2	9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079
 culsans-0.11.0-py3-none-any.whl	0.11.0	278d118f63fc75b9db11b664b436a1b83cc30d9577127848ba41420e66eb5a47
 cycler-0.12.1-py3-none-any.whl	0.12.1	85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30
-cyclopts-5.5.3-py3-none-any.whl	5.5.3	61c5713c34fe161430ba6e6ced2de0ed29b60d0893ac0d9c3490a77aa8899068d
+cyclopts-5.5.3-py3-none-any.whl	5.5.3	301925cfb9c7df0607df2e2ed4a937cf39e2cc0d312e74d8be6a8e40b7a92e75
 dashscope-2.1.1-py3-none-any.whl	2.1.1	fdabe219716d8bcd34cdc47174d58a678c1ed3d3092db58d153d7922fa4bf542
 dateparser-1.5.1-py3-none-any.whl	1.5.1	1d312d2dbc3cddd61fe96d336af733b54bd01d7beb5657a432c7d1c2a144a5c8
 dingtalk_stream-0.24.3-py3-none-any.whl	0.24.3	2160403656985962878bf60cdf5adf41619f21067348e06f07a7c7eebf5943ad
