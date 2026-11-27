@@ -26,13 +26,12 @@
                               (5) build-fpk.sh
                                    ├─ CSP 补丁  (patch-app-web-csp.py  + --check)
                                    ├─ logo 补丁 (patch-app-web-logo.py + --check)
-                                   ├─ manifest 按 profile 重写（test / appstore）
-                                   ├─ fnpack build --nosign
-                                   └─ 新鲜度校验 + profile 断言 + verify-fpk.sh
-                                   │
-                                   ▼
-                        jiuwenswarm-0.2.9-12.fpk             (测试包)
-                        jiuwenswarm-0.2.9-12-appstore.fpk    (上架包)
+                                    ├─ manifest 断言 + 恒等原子替换（Q-01 机制）
+                                    ├─ fnpack build --nosign
+                                    └─ 新鲜度校验 + install_dep_apps 断言 + verify-fpk.sh
+                                    │
+                                    ▼
+                         jiuwenswarm-0.2.9-12.fpk             (应用中心包，唯一产物)
 ```
 
 **顺序不能颠倒**：`.fpk` 里的 wheel 是第 2 步的产物，补丁是第 5 步对 wheel 的再加工；
@@ -170,23 +169,27 @@ TMPDIR=$HOME/fnpack-tmp FNPACK=/path/to/fnpack bash scripts/build-fpk.sh
 
 | 环境变量 | 作用 | 默认 |
 |---|---|---|
-| `BUILD_PROFILE` | `test` / `appstore` | `test` |
+| `BUILD_PROFILE` | 仅接受 `appstore`（或不设置，等价）；历史值 `test` 及其他值报错终止 | `appstore` |
 | `FNPACK` | fnpack 可执行文件 | 取 `PATH` |
 | `SIGN` | `1` = 用已导入的开发者证书签名 | `0`（`--nosign`） |
 | `TMPDIR` | 临时目录 | 系统默认（**建议显式指定**，见 §8） |
 
-### 3.1 两个 profile 的唯一差异
+### 3.1 应用中心档位（唯一档位）
 
-| | 测试包 | 上架包 |
-|---|---|---|
-| `install_dep_apps` | **无** | `python312` |
-| 产物名 | `jiuwenswarm-<version>.fpk` | `jiuwenswarm-<version>-appstore.fpk` |
-| 安装通道 | CLI 或 UI | **仅应用中心 UI** |
+| | 应用中心包（唯一产物） |
+|---|---|
+| `install_dep_apps` | `python312` |
+| 产物名 | `jiuwenswarm-<version>.fpk` |
+| 安装通道 | **仅应用中心 UI**（CLI `install-fpk` 有安全闸会拦截带依赖的包） |
 
-原因：平台把 `install_dep_apps` 当作"会改动系统依赖"的强操作，命令行 `install-fpk` 有安全闸会拦截带依赖的包；
-应用中心 UI 安装依赖是正常流程。**所以必须出两个包**，不要试图用一个包通吃。
+决策记录：平台把 `install_dep_apps` 当作"会改动系统依赖"的强操作，命令行 `install-fpk` 有安全闸会拦截带依赖的包；
+应用中心 UI 安装依赖是正常流程。历史上（0.2.9-12 及以前）曾因此同时构建"测试包"（暂存期删行，供 CLI 真机验证）与
+"上架包"（应用中心通道）两个包；自 0.2.9-12 单包化决策起**取消测试包，仅出应用中心包**——CLI 安装通道随之放弃，
+真机验证统一走应用中心 UI 手动安装同一包。理由：唯一包带渠道后缀是冗余信息；双轨档位与双包文档的长期漂移成本高；
+CLI 验证场景由 UI 安装同一包覆盖。
 
-实现方式：脚本把工程**硬链接**复制到暂存目录（`cp -al`，避免复制 468 MB），在暂存目录里按 profile 重写 `manifest`
+实现方式：脚本把工程**硬链接**复制到暂存目录（`cp -al`，避免复制 468 MB），对暂存 `manifest` 先断言上架形态
+（`install_dep_apps=python312` 在位，缺失即 fail-fast），再做**内容恒等的原子替换**
 ——写入走**临时文件 + `os.replace` 原子替换**（替换后暂存 manifest 指向新 inode，硬链接被打断，绝不改工作区；
 历史上曾因原地 `write_text` 截断重写硬链接文件而静默删掉工作区 `install_dep_apps` 行，即分析报告 Q-01，已修复），
 然后 `cd` 到暂存目录执行 `fnpack build`。
@@ -199,7 +202,7 @@ TMPDIR=$HOME/fnpack-tmp FNPACK=/path/to/fnpack bash scripts/build-fpk.sh
 | **logo 补丁** `patch-app-web-logo.py` + `--check` | 把 dist 里根路径 `/logo.svg` 补上网关前缀 | 同上 |
 | **新鲜度** `verify-package-freshness.py` | 包内关键脚本与工作区**逐字节**比对 | 不一致 → 拒绝交付 |
 
-外加 **profile 断言**：`test` 包内不得出现 `install_dep_apps`，`appstore` 包内必须是 `python312`——直接读产物里的 `manifest` 校验。
+外加 **install_dep_apps 断言**：包内 `manifest` 必须是 `install_dep_apps=python312`（上架形态）——直接读产物里的 `manifest` 校验。
 
 > 这三道闸门都来自真实事故：曾出现"代码 17:24 改好、包 17:06 就打完了"，设备上跑旧文件，整轮排查方向全错。
 > 逻辑 review 抓不到这类问题，只有 sha 比对能抓。
@@ -207,8 +210,8 @@ TMPDIR=$HOME/fnpack-tmp FNPACK=/path/to/fnpack bash scripts/build-fpk.sh
 ### 3.3 `fnpack` 的两个坑
 
 1. **`fnpack build` 把 `.fpk` 写到当前工作目录**，与 `-d` 参数无关 ⇒ 脚本在暂存目录里 `cd` 后执行。
-2. **`fnpack` 会重排 manifest 键值并追加 `checksum`** ⇒ 比较两个 profile 的 manifest 时，要按"键=值"归一化，
-   并剔除 `install_dep_apps` 与 `checksum`，否则永远不等。
+2. **`fnpack` 会重排 manifest 键值并追加 `checksum`** ⇒ 比较暂存 manifest 与包内 manifest 时，要按"键=值"归一化，
+   并剔除 `checksum`，否则永远不等。
 
 安装 fnpack：
 
@@ -296,7 +299,8 @@ python3 -m venv /tmp/verify-venv
 | `ERROR: app/wheelhouse 为空。请先执行 bash scripts/build-payload.sh` | 没跑载荷步骤，或 `wheelhouse` 被清 | 跑 §2 |
 | `ERROR: CSP 补丁失败（上游 app_web.py 可能已改动）` | 上游把 `frame-ancestors 'none'` 那行改了 | 读补丁脚本报错，按新代码更新 `TARGET/OLD/NEW`；**不要**跳过闸门 |
 | `ERROR: 包内文件与工作区不一致，拒绝交付` | 打包后又改了代码 | 重新构建（这正是闸门存在的意义） |
-| `ERROR: 上架包缺少 install_dep_apps=python312` | profile 参数没传到 | 用 `BUILD_PROFILE=appstore bash scripts/build-fpk.sh` |
+| `ERROR: 包内 manifest 缺少 install_dep_apps=python312` | 暂存/工作区 manifest 缺 `install_dep_apps=python312` | 核对工作区 `manifest` 是否被改动（应含 `install_dep_apps=python312`），修正后重跑 |
+| `ERROR: 仅支持应用中心档位，test 档位已移除…` | 按旧习惯传了 `BUILD_PROFILE=test` 等历史值 | 去掉该环境变量直接跑，或显式 `BUILD_PROFILE=appstore` |
 | `No space left on device` | `/tmp` 太小（暂存目录 + fnpack 临时文件） | `TMPDIR=$HOME/fnpack-tmp`，确保 ≥10 GB |
 | `.fpk` 落在奇怪目录 | `fnpack build` 写到 cwd | 用 `scripts/build-fpk.sh`（已在暂存目录内 cd） |
 | 构建机 Python 不是 3.12 | wheel 标签变 `cp313` 等 | 用 3.12 的解释器（`PYTHON=python3.12`） |
@@ -326,9 +330,9 @@ bash scripts/verify-fpk.sh jiuwenswarm-0.2.9-12.fpk
 # 2) 新鲜度（包内 == 工作区）
 python3 scripts/verify-package-freshness.py jiuwenswarm-0.2.9-12.fpk .
 
-# 3) 记录指纹（同一批命令内取，避免大小与 sha 来自不同次构建）
-ls -l jiuwenswarm-0.2.9-12.fpk jiuwenswarm-0.2.9-12-appstore.fpk
-sha256sum jiuwenswarm-0.2.9-12.fpk jiuwenswarm-0.2.9-12-appstore.fpk
+# 3) 记录指纹（唯一产物；同一批命令内取，避免大小与 sha 来自不同次构建）
+ls -l jiuwenswarm-0.2.9-12.fpk
+sha256sum jiuwenswarm-0.2.9-12.fpk
 
 # 4) 发布前敏感信息门禁（0 未解释命中才可推送）
 python3 -B scripts/sensitive-scan.py --strict .
